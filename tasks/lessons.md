@@ -25,6 +25,17 @@
 - IMU: negate ax, ay, gx, gy, gz; keep az
 - Magnetometer: negate mx, my; keep mz
 
+## ROS2 Launch Files
+- v4l2_camera's `image_size` parameter expects `integer_array` type — LaunchConfiguration substitutions resolve to strings, causing InvalidParameterTypeException
+- Fix: use `OpaqueFunction` to call `.perform(context)` and cast to `int()` before passing to Node parameters
+- General rule: any ROS2 parameter expecting int/float arrays will fail with LaunchConfiguration strings — always use OpaqueFunction for type conversion
+
+## Camera (Logitech 046d:0825)
+- Works with `v4l2_camera` package, YUYV @ 640x480, auto-converts to RGB8
+- Publishes /image_raw at 30fps and /camera_info
+- No calibration file yet — camera_calibration_parsers warns but runs fine
+- YUYV→RGB8 conversion is "possibly slow" per v4l2_camera — consider MJPG output_encoding for better performance
+
 ## udev
 - CH340 (1a86:7523) → /dev/roscar_board (motor board)
 - CP210x (10c4:ea60) → /dev/rplidar (RPLIDAR C1)

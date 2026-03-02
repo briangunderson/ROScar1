@@ -12,10 +12,10 @@
 - [x] All 6 nodes running: driver, robot_state_publisher, joint_state_publisher, sllidar, imu_filter, ekf
 - [x] Teleop driving confirmed working
 
-## Milestone 2: Camera Integration
-- [ ] v4l2_camera launch
-- [ ] Camera link in URDF
-- [ ] Test image streaming
+## Milestone 2: Camera Integration ✅
+- [x] v4l2_camera launch (fixed image_size param type — OpaqueFunction for int cast)
+- [x] Camera link in URDF (camera_link + camera_optical_frame already in xacro)
+- [x] Test image streaming (/image_raw at 30fps, /camera_info publishing)
 
 ## Milestone 3: Sensor Fusion
 - [ ] robot_localization EKF config
