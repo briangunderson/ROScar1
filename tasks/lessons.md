@@ -16,6 +16,15 @@
 - SSH + sudo requires NOPASSWD config for remote automation (`/etc/sudoers.d/brian-nopasswd`)
 - teleop_twist_keyboard needs its own terminal with stdin — can't capture keys when launched inside a launch file. Run robot bringup and teleop in separate terminals.
 
+## Hardware Orientation
+- Board's X-axis (forward) points opposite to the physical front (where camera/lidar are)
+- Motor L/R ports are also swapped relative to the board's expectations
+- Net result: negate ALL components (vx, vy, wz) at the hardware boundary in driver_node.py
+- Commands: `set_car_motion(-vx, -vy, -wz)`
+- Odometry: negate vx, vy, vz from `get_motion_data()`
+- IMU: negate ax, ay, gx, gy, gz; keep az
+- Magnetometer: negate mx, my; keep mz
+
 ## udev
 - CH340 (1a86:7523) → /dev/roscar_board (motor board)
 - CP210x (10c4:ea60) → /dev/rplidar (RPLIDAR C1)
