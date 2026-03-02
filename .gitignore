@@ -1,0 +1,26 @@
+# ROS2 build artifacts
+roscar_ws/build/
+roscar_ws/install/
+roscar_ws/log/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# OTA lock (local coordination, not committed)
+.ota-lock

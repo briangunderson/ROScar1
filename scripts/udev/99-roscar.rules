@@ -1,0 +1,20 @@
+# udev rule to bind the YB-ERF01-V3.0 motor board to a stable device name.
+#
+# The board uses a CH340/CH341 USB-to-serial chip (common on Yahboom boards).
+# This rule creates a symlink at /dev/roscar_board so the serial port name
+# is consistent across reboots regardless of USB enumeration order.
+#
+# To find your board's idVendor/idProduct, run:
+#   udevadm info -a /dev/ttyUSB0 | grep -E "idVendor|idProduct"
+#
+# Common values:
+#   CH340/CH341: idVendor=1a86, idProduct=7523
+#   CP2102:      idVendor=10c4, idProduct=ea60
+#
+# Install: sudo cp 99-roscar.rules /etc/udev/rules.d/
+#          sudo udevadm control --reload-rules && sudo udevadm trigger
+
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="roscar_board", MODE="0666"
+
+# RPLIDAR C1 - Silicon Labs CP210x USB-to-UART
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", SYMLINK+="rplidar", MODE="0666"
