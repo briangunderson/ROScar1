@@ -8,7 +8,7 @@ A ROS2 Jazzy workspace for a 4WD Mecanum wheel robot built on:
 - **RPLIDAR C1** (Slamtec) for 2D laser scanning, connected via USB
 - **4x DC encoder motors** with mecanum wheels
 
-**Status**: Milestone 1 (teleop-ready skeleton) complete. Untested on hardware.
+**Status**: Milestones 1-3 complete. Teleop driving, camera streaming, and EKF sensor fusion all verified on hardware.
 
 ## Architecture
 The STM32 board handles PID motor control and mecanum inverse kinematics internally.
@@ -20,7 +20,7 @@ cmd_vel -> roscar_driver -> Rosmaster_Lib -> USB Serial -> STM32 -> Motors
          -> odom_raw, imu/data_raw, battery_voltage
 ```
 
-Full pipeline with EKF:
+Full pipeline with EKF (verified working):
 ```
 teleop_twist_keyboard -> /cmd_vel -> roscar_driver -> /odom_raw, /imu/data_raw
                                                        |             |
@@ -30,6 +30,10 @@ teleop_twist_keyboard -> /cmd_vel -> roscar_driver -> /odom_raw, /imu/data_raw
                                                        +------+------+
                                                               v
                                                       /odometry/filtered
+
+Key: EKF owns odom->base_footprint TF (driver publish_odom_tf=false)
+     EKF fuses velocity from odom + differential yaw from IMU
+     Madgwick converts raw accel+gyro -> orientation (az=+9.81 when flat)
 ```
 
 ## Critical Files
@@ -65,6 +69,9 @@ teleop_twist_keyboard -> /cmd_vel -> roscar_driver -> /odom_raw, /imu/data_raw
 | `/imu/mag` | MagneticField | roscar_driver | Magnetometer |
 | `/battery_voltage` | Float32 | roscar_driver | Battery level |
 | `/scan` | LaserScan | sllidar_node | RPLIDAR C1 laser scan |
+| `/odometry/filtered` | Odometry | ekf_node | Fused odometry (wheels+IMU) |
+| `/image_raw` | Image | v4l2_camera | Camera feed (640x480, 30fps) |
+| `/camera_info` | CameraInfo | v4l2_camera | Camera calibration info |
 
 ## Rosmaster_Lib API (Key Methods)
 - `Rosmaster(car_type=1, com='/dev/roscar_board', delay=0.002)` - Constructor
@@ -108,10 +115,20 @@ rviz2 -d roscar_ws/src/roscar_description/rviz/roscar.rviz
 - Publishes: `/scan` (sensor_msgs/LaserScan)
 - Launch arg: `use_lidar:=true|false` in robot.launch.py
 
+## Hardware Orientation (CRITICAL)
+The board is mounted 180-deg rotated and motor L/R ports are swapped.
+All sensor/command data is corrected at the hardware boundary in driver_node.py:
+
+| Data | Correction |
+|------|-----------|
+| cmd_vel | `set_car_motion(-vx, -vy, -wz)` |
+| Wheel odom | negate vx, vy, vz from `get_motion_data()` |
+| Accelerometer | negate ALL: ax, ay, az (180-deg + gravity sign convention) |
+| Gyroscope | negate gx, gy ONLY; keep gz (Z-axis unchanged by yaw rotation) |
+| Magnetometer | negate mx, my; keep mz |
+
 ## TODO
 - [ ] Measure actual robot dimensions and update URDF
-- [ ] Install Rosmaster_Lib on RPi5 and test serial connection
-- [ ] Test teleop and tune speed limits
-- [ ] Tune EKF covariance parameters
 - [ ] Add SLAM (slam_toolbox) and Nav2 configuration
-- [ ] Verify udev rules match actual board USB IDs
+- [ ] Camera calibration for undistorted images
+- [ ] Fine-tune EKF covariances under dynamic conditions

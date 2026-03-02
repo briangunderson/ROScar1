@@ -17,10 +17,12 @@
 - [x] Camera link in URDF (camera_link + camera_optical_frame already in xacro)
 - [x] Test image streaming (/image_raw at 30fps, /camera_info publishing)
 
-## Milestone 3: Sensor Fusion
-- [ ] robot_localization EKF config
-- [ ] IMU Madgwick filter config
-- [ ] Tune parameters
+## Milestone 3: Sensor Fusion ✅
+- [x] Fix IMU sign conventions (negate all accel axes, negate only gx/gy for gyro)
+- [x] Fix conflicting odom TFs (driver publish_odom_tf=false, EKF owns TF)
+- [x] EKF config: velocity-only from odom, 20Hz, differential IMU yaw
+- [x] IMU Madgwick filter: fixed_frame=odom, gain=0.1, orientation correct (flat=identity)
+- [x] Verified: 0 NaN errors, position stable at origin when stationary, all topics 20Hz
 
 ## Milestone 4: SLAM + Navigation
 - [ ] SLAM Toolbox config

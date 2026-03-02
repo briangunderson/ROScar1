@@ -22,7 +22,8 @@
 - Net result: negate ALL components (vx, vy, wz) at the hardware boundary in driver_node.py
 - Commands: `set_car_motion(-vx, -vy, -wz)`
 - Odometry: negate vx, vy, vz from `get_motion_data()`
-- IMU: negate ax, ay, gx, gy, gz; keep az
+- IMU accelerometer: negate ALL three axes (ax, ay, az) — 180-deg yaw flips x,y; Rosmaster_Lib reports gravity as -Z but ROS expects +9.81 when flat, so negate az too
+- IMU gyroscope: negate gx, gy only; gz is UNCHANGED by 180-deg yaw rotation (Z-axis direction preserved). Do NOT negate gz — it must agree with wheel encoder angular velocity or the EKF goes to NaN
 - Magnetometer: negate mx, my; keep mz
 
 ## ROS2 Launch Files
@@ -35,6 +36,14 @@
 - Publishes /image_raw at 30fps and /camera_info
 - No calibration file yet — camera_calibration_parsers warns but runs fine
 - YUYV→RGB8 conversion is "possibly slow" per v4l2_camera — consider MJPG output_encoding for better performance
+
+## Sensor Fusion (EKF + Madgwick)
+- imu_filter_madgwick: `fixed_frame` must be `odom`, NOT `base_link` — Madgwick needs a non-rotating reference
+- Only ONE node should publish odom->base_footprint TF. With EKF running, set driver's `publish_odom_tf: false`
+- EKF: don't fuse both position AND velocity from wheel odom — position is just integrated velocity, so they're not independent. Use velocity only from odom, let EKF integrate.
+- EKF frequency 20Hz is sufficient for RPi5; 30Hz causes "failed to meet update rate" startup errors
+- When debugging, watch out for STALE PROCESSES from previous launches. Multiple driver nodes publishing on the same topic causes confusing data. Always `kill -9` by PID before relaunching.
+- The `pgrep` command is not installed by default on Ubuntu 24.04 Server — use `killall` or `ps aux | grep` + `kill` instead
 
 ## udev
 - CH340 (1a86:7523) → /dev/roscar_board (motor board)
