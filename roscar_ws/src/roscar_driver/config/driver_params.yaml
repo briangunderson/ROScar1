@@ -9,7 +9,7 @@ roscar_driver:
     odom_frame: "odom"
     base_frame: "base_footprint"
     imu_frame: "imu_link"
-    publish_odom_tf: true
+    publish_odom_tf: false   # EKF owns odom->base_footprint TF
 
     # Velocity limits (m/s and rad/s)
     max_linear_x: 1.0

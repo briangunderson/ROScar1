@@ -124,9 +124,9 @@ class RoscarDriverNode(Node):
     def _cmd_vel_callback(self, msg: Twist):
         """Forward velocity commands to the motor board.
 
-        The board's X-axis points opposite to the robot's physical front
-        (where camera/lidar are mounted), so we negate vx and vy before
-        sending to the board.  Angular-z is unaffected (180° yaw rotation).
+        The board is mounted 180-deg rotated (camera/lidar on its "rear") and
+        motor L/R ports are swapped.  Net effect: negate all three components
+        (vx, vy, wz) at the hardware boundary.
         """
         self._last_cmd_time = self.get_clock().now()
 
@@ -213,12 +213,16 @@ class RoscarDriverNode(Node):
             self._tf_broadcaster.sendTransform(t)
 
         # --- IMU ---
-        # Board axes are 180° rotated: negate x, y components; z unchanged
+        # Board axes are 180-deg rotated in yaw: negate x, y for both.
+        # Accel z: Rosmaster_Lib reports gravity as negative; ROS expects
+        # +9.81 when flat, so negate az too.
+        # Gyro z: 180-deg yaw rotation does NOT change gz direction, so
+        # keep gz as-is (it must agree with wheel encoder angular velocity).
         try:
             ax, ay, az = self._bot.get_accelerometer_data()
             gx, gy, gz = self._bot.get_gyroscope_data()
-            ax, ay = -ax, -ay
-            gx, gy, gz = -gx, -gy, -gz
+            ax, ay, az = -ax, -ay, -az
+            gx, gy = -gx, -gy
         except Exception:
             ax, ay, az = 0.0, 0.0, 0.0
             gx, gy, gz = 0.0, 0.0, 0.0
