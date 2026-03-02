@@ -135,7 +135,7 @@ class RoscarDriverNode(Node):
         wz = self._clamp(msg.angular.z, self._max_wz)
 
         if self._bot is not None:
-            self._bot.set_car_motion(-vx, -vy, wz)
+            self._bot.set_car_motion(-vx, -vy, -wz)
 
     def _watchdog_callback(self):
         """Stop motors if no cmd_vel received recently."""
@@ -153,10 +153,11 @@ class RoscarDriverNode(Node):
         time_sec = now.nanoseconds / 1e9
 
         # --- Velocity / Odometry ---
-        # Board axes are 180° rotated from robot frame: negate vx, vy
+        # Board axes are rotated from robot frame and motor ports are
+        # swapped left/right: negate all velocity components
         try:
             vx, vy, vz = self._bot.get_motion_data()
-            vx, vy = -vx, -vy
+            vx, vy, vz = -vx, -vy, -vz
         except Exception:
             vx, vy, vz = 0.0, 0.0, 0.0
 
@@ -217,7 +218,7 @@ class RoscarDriverNode(Node):
             ax, ay, az = self._bot.get_accelerometer_data()
             gx, gy, gz = self._bot.get_gyroscope_data()
             ax, ay = -ax, -ay
-            gx, gy = -gx, -gy
+            gx, gy, gz = -gx, -gy, -gz
         except Exception:
             ax, ay, az = 0.0, 0.0, 0.0
             gx, gy, gz = 0.0, 0.0, 0.0
