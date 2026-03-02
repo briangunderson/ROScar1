@@ -122,7 +122,12 @@ class RoscarDriverNode(Node):
         return max(-limit, min(limit, value))
 
     def _cmd_vel_callback(self, msg: Twist):
-        """Forward velocity commands to the motor board."""
+        """Forward velocity commands to the motor board.
+
+        The board's X-axis points opposite to the robot's physical front
+        (where camera/lidar are mounted), so we negate vx and vy before
+        sending to the board.  Angular-z is unaffected (180° yaw rotation).
+        """
         self._last_cmd_time = self.get_clock().now()
 
         vx = self._clamp(msg.linear.x, self._max_vx)
@@ -130,7 +135,7 @@ class RoscarDriverNode(Node):
         wz = self._clamp(msg.angular.z, self._max_wz)
 
         if self._bot is not None:
-            self._bot.set_car_motion(vx, vy, wz)
+            self._bot.set_car_motion(-vx, -vy, wz)
 
     def _watchdog_callback(self):
         """Stop motors if no cmd_vel received recently."""
@@ -148,8 +153,10 @@ class RoscarDriverNode(Node):
         time_sec = now.nanoseconds / 1e9
 
         # --- Velocity / Odometry ---
+        # Board axes are 180° rotated from robot frame: negate vx, vy
         try:
             vx, vy, vz = self._bot.get_motion_data()
+            vx, vy = -vx, -vy
         except Exception:
             vx, vy, vz = 0.0, 0.0, 0.0
 
@@ -205,9 +212,12 @@ class RoscarDriverNode(Node):
             self._tf_broadcaster.sendTransform(t)
 
         # --- IMU ---
+        # Board axes are 180° rotated: negate x, y components; z unchanged
         try:
             ax, ay, az = self._bot.get_accelerometer_data()
             gx, gy, gz = self._bot.get_gyroscope_data()
+            ax, ay = -ax, -ay
+            gx, gy = -gx, -gy
         except Exception:
             ax, ay, az = 0.0, 0.0, 0.0
             gx, gy, gz = 0.0, 0.0, 0.0
@@ -232,8 +242,10 @@ class RoscarDriverNode(Node):
         self._pub_imu.publish(imu_msg)
 
         # --- Magnetometer ---
+        # Board axes are 180° rotated: negate x, y components; z unchanged
         try:
             mx, my, mz = self._bot.get_magnetometer_data()
+            mx, my = -mx, -my
         except Exception:
             mx, my, mz = 0.0, 0.0, 0.0
 
