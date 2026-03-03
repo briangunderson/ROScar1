@@ -12,6 +12,7 @@ control internally. This node only needs to:
 """
 
 import math
+import time
 
 import rclpy
 from rclpy.node import Node
@@ -54,6 +55,7 @@ class RoscarDriverNode(Node):
         self.declare_parameter('max_linear_y', 1.0)   # m/s
         self.declare_parameter('max_angular_z', 5.0)   # rad/s
         self.declare_parameter('pub_rate', 20.0)       # Hz
+        self.declare_parameter('gyro_cal_seconds', 2.0)  # startup calibration
 
         # -- Read parameters --
         serial_port = self.get_parameter('serial_port').value
@@ -90,6 +92,15 @@ class RoscarDriverNode(Node):
                 f'Running in dry-run mode (no hardware).'
             )
 
+        # -- Gyro bias calibration --
+        # Sample the gyroscope while stationary at startup to measure bias.
+        # MEMS gyros always have a small non-zero offset that causes yaw drift
+        # if not compensated.
+        self._gyro_bias = [0.0, 0.0, 0.0]
+        cal_secs = self.get_parameter('gyro_cal_seconds').value
+        if self._bot is not None and cal_secs > 0:
+            self._calibrate_gyro(cal_secs)
+
         # -- Odometry integrator --
         self._odom = MecanumOdometry()
 
@@ -117,6 +128,33 @@ class RoscarDriverNode(Node):
         self._watchdog_timer = self.create_timer(0.1, self._watchdog_callback)
 
         self.get_logger().info('ROScar1 driver node started')
+
+    def _calibrate_gyro(self, duration: float):
+        """Sample gyroscope while stationary to measure bias offset."""
+        self.get_logger().info(
+            f'Calibrating gyro bias ({duration:.1f}s) — keep robot still...')
+        samples = []
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < duration:
+            try:
+                gx, gy, gz = self._bot.get_gyroscope_data()
+                samples.append((gx, gy, gz))
+            except Exception:
+                pass
+            time.sleep(0.01)  # ~100 Hz sampling
+
+        if len(samples) < 10:
+            self.get_logger().warn(
+                f'Gyro calibration: only {len(samples)} samples, skipping')
+            return
+
+        bx = sum(s[0] for s in samples) / len(samples)
+        by = sum(s[1] for s in samples) / len(samples)
+        bz = sum(s[2] for s in samples) / len(samples)
+        self._gyro_bias = [bx, by, bz]
+        self.get_logger().info(
+            f'Gyro bias ({len(samples)} samples): '
+            f'gx={bx:.5f} gy={by:.5f} gz={bz:.5f} rad/s')
 
     def _clamp(self, value: float, limit: float) -> float:
         return max(-limit, min(limit, value))
@@ -221,6 +259,11 @@ class RoscarDriverNode(Node):
         try:
             ax, ay, az = self._bot.get_accelerometer_data()
             gx, gy, gz = self._bot.get_gyroscope_data()
+            # Subtract startup bias (MEMS gyro offset compensation)
+            gx -= self._gyro_bias[0]
+            gy -= self._gyro_bias[1]
+            gz -= self._gyro_bias[2]
+            # Board 180° rotation correction
             ax, ay, az = -ax, -ay, -az
             gx, gy = -gx, -gy
         except Exception:
