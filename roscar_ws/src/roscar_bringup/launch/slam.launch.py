@@ -32,6 +32,10 @@ def generate_launch_description():
     )
 
     # -- slam_toolbox (online async) --
+    # NOTE: async_slam_toolbox_node is a lifecycle node in Jazzy.
+    # It starts in "unconfigured" state and must be transitioned to
+    # "active" before it processes scans. The lifecycle_manager below
+    # handles this automatically via the configure -> activate sequence.
     slam_config = os.path.join(bringup_dir, 'config', 'slam_toolbox.yaml')
     slam_node = Node(
         package='slam_toolbox',
@@ -41,7 +45,20 @@ def generate_launch_description():
         output='screen',
     )
 
+    # -- Lifecycle manager to auto-activate slam_toolbox --
+    lifecycle_manager = Node(
+        package='nav2_lifecycle_manager',
+        executable='lifecycle_manager',
+        name='lifecycle_manager_slam',
+        output='screen',
+        parameters=[{
+            'autostart': True,
+            'node_names': ['slam_toolbox'],
+        }],
+    )
+
     return LaunchDescription([
         robot_launch,
         slam_node,
+        lifecycle_manager,
     ])
