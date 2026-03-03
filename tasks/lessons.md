@@ -64,6 +64,26 @@
 - Sub-module init functions (initTeleop, initStatus, etc.) are called AFTER app.js fully evaluates,
   so `moduleCallbacks` is already initialized — safe to call `onAppEvent()` inside them.
 
+## roslibjs + ROS2 rosbridge
+- ROSLIB.ActionClient uses ROS1-style message naming (`NavigateToPoseGoal`) — doesn't exist in ROS2
+- rosbridge_suite for ROS2 errors on the bad advertise, and the connection drops
+- If ActionClient is created on every 'connected' event, it causes a reconnect loop (connect → error → close → 3s → reconnect)
+- This prevents ALL other functionality (e.g., /cmd_vel never gets established)
+- **Rule**: defer ActionClient creation to when it's actually needed (e.g., user enters nav goal mode), not on connection
+- TODO: investigate newer roslibjs versions that support ROS2 actions natively, or use ROSLIB.Service for /navigate_to_pose
+
+## Deployment: Git Repo vs Workspace on Pi
+- Git repo lives at `~/ROScar1/` on the Pi
+- `roscar_web` and `roscar_interfaces` are COPIED into `~/roscar_ws/src/` (not symlinked)
+- `colcon build --symlink-install` symlinks install → build → src (the workspace copy)
+- `git pull` updates `~/ROScar1/` but NOT `~/roscar_ws/src/roscar_web/`
+- Must manually `cp` changed files from `~/ROScar1/...` to `~/roscar_ws/src/...` after pull
+- `chmod +x` on scripts causes local git changes — use `git checkout --` before pull
+
+## systemd for ROS2
+- ROS2 `setup.bash` uses unbound variables (e.g., `AMENT_TRACE_SETUP_FILES`) — don't use `set -u` in launcher scripts
+- Use `set -eo pipefail` (not `-euo`) for ROS2 launcher scripts
+
 ## udev
 - CH340 (1a86:7523) → /dev/roscar_board (motor board)
 - CP210x (10c4:ea60) → /dev/rplidar (RPLIDAR C1)
