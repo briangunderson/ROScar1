@@ -1,0 +1,5 @@
+---
+string mode
+string[] available_modes
+string[] active_nodes
+bool robot_running

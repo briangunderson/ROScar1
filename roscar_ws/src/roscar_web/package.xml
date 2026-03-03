@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>roscar_web</name>
+  <version>0.1.0</version>
+  <description>Web dashboard for ROScar1 robot operation</description>
+  <maintainer email="todo@todo.com">ROScar1</maintainer>
+  <license>MIT</license>
+
+  <exec_depend>roscar_interfaces</exec_depend>
+  <exec_depend>rosbridge_suite</exec_depend>
+  <exec_depend>web_video_server</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

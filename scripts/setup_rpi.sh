@@ -48,6 +48,8 @@ apt install -y \
     ros-jazzy-slam-toolbox \
     ros-jazzy-navigation2 \
     ros-jazzy-nav2-bringup \
+    ros-jazzy-rosbridge-suite \
+    ros-jazzy-web-video-server \
     python3-serial
 
 # ---- 4. Initialize rosdep ----

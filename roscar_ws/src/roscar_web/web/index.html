@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>ROScar1 Control</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- ═══════════════════ HEADER ═══════════════════ -->
+  <header id="app-header">
+    <div class="header-left">
+      <div class="logo">
+        <span class="logo-bracket">[</span>ROScar1<span class="logo-bracket">]</span>
+      </div>
+      <div id="conn-indicator" class="conn-indicator disconnected">
+        <span class="conn-dot"></span>
+        <span class="conn-label">DISCONNECTED</span>
+      </div>
+    </div>
+    <div class="header-center">
+      <div class="mode-badge">
+        <span class="mode-label">MODE</span>
+        <span id="mode-display" class="mode-value">IDLE</span>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="battery-display">
+        <span class="battery-label">BATT</span>
+        <div class="battery-bar-wrap">
+          <div id="battery-bar" class="battery-bar" style="width:0%"></div>
+        </div>
+        <span id="battery-voltage" class="battery-voltage mono">--.-V</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ═══════════════════ TAB BAR ═══════════════════ -->
+  <nav id="tab-bar">
+    <button class="tab-btn active" data-tab="drive">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+      DRIVE
+    </button>
+    <button class="tab-btn" data-tab="camera">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+      CAMERA
+    </button>
+    <button class="tab-btn" data-tab="map">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
+      MAP
+    </button>
+    <button class="tab-btn" data-tab="status">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      STATUS
+    </button>
+    <button class="tab-btn" data-tab="settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      SETTINGS
+    </button>
+  </nav>
+
+  <!-- ═══════════════════ TAB PANELS ═══════════════════ -->
+  <main id="app-main">
+
+    <!-- DRIVE TAB -->
+    <div class="tab-panel active" id="tab-drive">
+      <div class="drive-layout">
+        <div class="joy-block left-joy">
+          <div class="joy-header">
+            <span class="joy-title">TRANSLATE</span>
+            <div class="vel-chips">
+              <span class="vel-chip">VX <span id="vx-disp" class="mono">+0.00</span></span>
+              <span class="vel-chip">VY <span id="vy-disp" class="mono">+0.00</span></span>
+            </div>
+          </div>
+          <div class="joy-zone" id="joy-translate"></div>
+          <div class="joy-hint">Forward · Back · Strafe</div>
+        </div>
+
+        <div class="drive-center-col">
+          <div class="speed-card">
+            <label class="param-label">LINEAR LIMIT</label>
+            <input type="range" id="spd-linear" min="0.1" max="1.0" step="0.05" value="0.3">
+            <span id="spd-linear-val" class="mono">0.30 m/s</span>
+          </div>
+          <div class="speed-card">
+            <label class="param-label">ANGULAR LIMIT</label>
+            <input type="range" id="spd-angular" min="0.1" max="3.0" step="0.1" value="1.0">
+            <span id="spd-angular-val" class="mono">1.0 rad/s</span>
+          </div>
+          <div class="kbd-hints">
+            <div class="kbd-row"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Translate</div>
+            <div class="kbd-row"><kbd>Q</kbd><kbd>E</kbd> Rotate</div>
+          </div>
+        </div>
+
+        <div class="joy-block right-joy">
+          <div class="joy-header">
+            <span class="joy-title">ROTATE</span>
+            <div class="vel-chips">
+              <span class="vel-chip">WZ <span id="wz-disp" class="mono">+0.00</span></span>
+            </div>
+          </div>
+          <div class="joy-zone" id="joy-rotate"></div>
+          <div class="joy-hint">Left · Right</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CAMERA TAB -->
+    <div class="tab-panel" id="tab-camera">
+      <div class="camera-layout">
+        <div class="camera-frame">
+          <img id="camera-img" alt="Camera feed offline" draggable="false">
+          <div id="camera-overlay" class="camera-overlay">
+            <span>CAMERA OFFLINE</span>
+          </div>
+        </div>
+        <div class="camera-controls">
+          <label class="param-label">QUALITY</label>
+          <div class="btn-group">
+            <button class="pill-btn" data-quality="20">LOW</button>
+            <button class="pill-btn active" data-quality="50">MED</button>
+            <button class="pill-btn" data-quality="80">HIGH</button>
+          </div>
+          <label class="param-label" style="margin-top:12px">RESOLUTION</label>
+          <div class="btn-group">
+            <button class="pill-btn" data-res="320x240">320p</button>
+            <button class="pill-btn active" data-res="640x480">640p</button>
+          </div>
+          <button id="cam-fullscreen" class="action-btn" style="margin-top:16px">
+            FULLSCREEN
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MAP TAB -->
+    <div class="tab-panel" id="tab-map">
+      <div class="map-layout">
+        <canvas id="map-canvas"></canvas>
+        <div class="map-controls">
+          <button class="icon-btn" id="map-zoom-in" title="Zoom In">＋</button>
+          <button class="icon-btn" id="map-zoom-out" title="Zoom Out">－</button>
+          <button class="icon-btn" id="map-reset" title="Reset View">⌖</button>
+          <div class="map-info">
+            <span id="map-size-disp" class="mono map-stat">--×--</span>
+            <span id="map-res-disp" class="mono map-stat">--cm</span>
+          </div>
+          <div id="nav-goal-hint" class="nav-hint hidden">
+            TAP MAP TO SET GOAL
+          </div>
+          <button id="cancel-goal-btn" class="action-btn danger hidden">CANCEL GOAL</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- STATUS TAB -->
+    <div class="tab-panel" id="tab-status">
+      <div class="status-grid">
+        <div class="status-card">
+          <div class="card-title">POSITION</div>
+          <div class="gauge-row">
+            <div class="gauge-item"><span class="gauge-axis">X</span><span id="st-x" class="mono gauge-val">+0.000</span><span class="gauge-unit">m</span></div>
+            <div class="gauge-item"><span class="gauge-axis">Y</span><span id="st-y" class="mono gauge-val">+0.000</span><span class="gauge-unit">m</span></div>
+            <div class="gauge-item"><span class="gauge-axis">θ</span><span id="st-yaw" class="mono gauge-val">+0.00</span><span class="gauge-unit">°</span></div>
+          </div>
+        </div>
+        <div class="status-card">
+          <div class="card-title">VELOCITY</div>
+          <div class="gauge-row">
+            <div class="gauge-item"><span class="gauge-axis">VX</span><span id="st-vx" class="mono gauge-val">+0.000</span><span class="gauge-unit">m/s</span></div>
+            <div class="gauge-item"><span class="gauge-axis">VY</span><span id="st-vy" class="mono gauge-val">+0.000</span><span class="gauge-unit">m/s</span></div>
+            <div class="gauge-item"><span class="gauge-axis">WZ</span><span id="st-wz" class="mono gauge-val">+0.000</span><span class="gauge-unit">r/s</span></div>
+          </div>
+        </div>
+        <div class="status-card">
+          <div class="card-title">ORIENTATION (IMU)</div>
+          <div class="gauge-row">
+            <div class="gauge-item"><span class="gauge-axis">ROLL</span><span id="st-roll" class="mono gauge-val">+0.0</span><span class="gauge-unit">°</span></div>
+            <div class="gauge-item"><span class="gauge-axis">PITCH</span><span id="st-pitch" class="mono gauge-val">+0.0</span><span class="gauge-unit">°</span></div>
+            <div class="gauge-item"><span class="gauge-axis">YAW</span><span id="st-imu-yaw" class="mono gauge-val">+0.0</span><span class="gauge-unit">°</span></div>
+          </div>
+        </div>
+        <div class="status-card">
+          <div class="card-title">BATTERY</div>
+          <div class="battery-big">
+            <div class="batt-gauge-wrap">
+              <div id="batt-fill" class="batt-fill"></div>
+            </div>
+            <span id="batt-volts" class="mono batt-volts">--.- V</span>
+            <span id="batt-pct" class="mono batt-pct">--%</span>
+          </div>
+        </div>
+        <div class="status-card wide">
+          <div class="card-title">ACTIVE NODES</div>
+          <div id="nodes-list" class="nodes-list mono">Waiting...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SETTINGS TAB -->
+    <div class="tab-panel" id="tab-settings">
+      <div class="settings-layout">
+
+        <section class="settings-section">
+          <h2 class="section-title">ROBOT MODE</h2>
+          <div class="mode-grid">
+            <button class="mode-btn active" data-mode="idle">
+              <span class="mode-icon">◼</span>
+              <span class="mode-name">IDLE</span>
+              <span class="mode-desc">No robot nodes running</span>
+            </button>
+            <button class="mode-btn" data-mode="teleop">
+              <span class="mode-icon">◈</span>
+              <span class="mode-name">TELEOP</span>
+              <span class="mode-desc">Drive with joystick</span>
+            </button>
+            <button class="mode-btn" data-mode="slam">
+              <span class="mode-icon">◎</span>
+              <span class="mode-name">SLAM</span>
+              <span class="mode-desc">Build a map</span>
+            </button>
+            <button class="mode-btn" data-mode="navigation">
+              <span class="mode-icon">◉</span>
+              <span class="mode-name">NAV</span>
+              <span class="mode-desc">Autonomous navigation</span>
+            </button>
+            <button class="mode-btn" data-mode="slam_nav">
+              <span class="mode-icon">⊕</span>
+              <span class="mode-name">SLAM+NAV</span>
+              <span class="mode-desc">Map and navigate</span>
+            </button>
+          </div>
+          <div id="nav-map-select" class="nav-map-select hidden">
+            <label class="param-label">MAP FILE PATH</label>
+            <input type="text" id="nav-map-path" class="text-input mono"
+              placeholder="/home/brian/maps/my_map.yaml">
+            <button id="apply-mode-btn" class="action-btn primary">APPLY MODE</button>
+          </div>
+          <div id="mode-status-msg" class="mode-status-msg"></div>
+        </section>
+
+        <section class="settings-section">
+          <h2 class="section-title">MAP MANAGEMENT</h2>
+          <div class="map-save-form">
+            <label class="param-label">SAVE CURRENT MAP</label>
+            <div class="input-row">
+              <input type="text" id="map-save-name" class="text-input mono" placeholder="my_map">
+              <button id="save-map-btn" class="action-btn">SAVE</button>
+            </div>
+            <div id="save-map-msg" class="mode-status-msg"></div>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <h2 class="section-title">CONNECTION</h2>
+          <div class="conn-info">
+            <div class="info-row">
+              <span class="info-label">ROBOT HOST</span>
+              <span id="info-host" class="mono info-value">--</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">ROSBRIDGE</span>
+              <span class="mono info-value">:9090</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">VIDEO</span>
+              <span class="mono info-value">:8080</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">DASHBOARD</span>
+              <span class="mono info-value">:8888</span>
+            </div>
+          </div>
+          <button id="reconnect-btn" class="action-btn">RECONNECT</button>
+        </section>
+
+      </div>
+    </div>
+  </main>
+
+  <!-- ═══════════════════ E-STOP ═══════════════════ -->
+  <button id="estop-btn" title="Emergency Stop (Spacebar)">
+    <span class="estop-icon">■</span>
+    <span class="estop-label">STOP</span>
+  </button>
+
+  <!-- ═══════════════════ TOAST ═══════════════════ -->
+  <div id="toast" class="toast"></div>
+
+  <!-- ═══════════════════ SCRIPTS ═══════════════════ -->
+  <script src="js/lib/roslib.min.js"></script>
+  <script src="js/lib/nipplejs.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

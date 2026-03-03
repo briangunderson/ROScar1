@@ -8,7 +8,7 @@ A ROS2 Jazzy workspace for a 4WD Mecanum wheel robot built on:
 - **RPLIDAR C1** (Slamtec) for 2D laser scanning, connected via USB
 - **4x DC encoder motors** with mecanum wheels
 
-**Status**: Milestones 1-3 fully verified. Milestone 4 SLAM mapping verified on hardware (slam_toolbox publishing /map). Nav2 navigation pending testing.
+**Status**: Milestones 1-3 fully verified. Milestone 4 SLAM mapping verified on hardware (slam_toolbox publishing /map). Nav2 navigation pending testing. Web dashboard implemented (roscar_web package + roscar_interfaces).
 
 ## Architecture
 The STM32 board handles PID motor control and mecanum inverse kinematics internally.
@@ -52,6 +52,9 @@ Key: EKF owns odom->base_footprint TF (driver publish_odom_tf=false)
 | `roscar_ws/src/roscar_bringup/launch/slam.launch.py` | SLAM mapping (teleop + slam_toolbox) |
 | `roscar_ws/src/roscar_bringup/launch/navigation.launch.py` | Nav2 on saved map |
 | `roscar_ws/src/roscar_bringup/launch/slam_nav.launch.py` | SLAM + Nav2 combined |
+| `roscar_ws/src/roscar_web/launch/web.launch.py` | Web dashboard (rosbridge+video+http) |
+| `roscar_ws/src/roscar_web/roscar_web/launch_manager_node.py` | Mode switching service node |
+| `roscar_ws/src/roscar_web/roscar_web/http_server_node.py` | Static file server node |
 | `scripts/setup_rpi.sh` | RPi5 initial setup script |
 
 ## Packages
@@ -61,6 +64,8 @@ Key: EKF owns odom->base_footprint TF (driver publish_odom_tf=false)
 | `roscar_driver` | ament_python | Hardware bridge: Rosmaster_Lib <-> ROS2 topics |
 | `roscar_description` | ament_cmake | URDF model, rviz config |
 | `roscar_bringup` | ament_cmake | Launch files, EKF/IMU filter configs |
+| `roscar_interfaces` | ament_cmake | Custom .srv: SetMode, SaveMap, GetStatus |
+| `roscar_web` | ament_python | Web dashboard: backend nodes + static frontend |
 
 ## Key Topics
 
@@ -131,6 +136,61 @@ ros2 launch roscar_bringup navigation.launch.py map:=$HOME/maps/my_map.yaml
 | vx | -0.2 | 0.5 | m/s |
 | vy | -0.3 | 0.3 | m/s (strafing) |
 | wz | -2.0 | 2.0 | rad/s |
+
+## Web Dashboard (roscar_web)
+
+### Architecture
+- **rosbridge_server** port 9090: WebSocket bridge to all ROS2 topics/services
+- **web_video_server** port 8080: MJPEG camera stream (`/image_raw`)
+- **http_server_node** port 8888: serves static frontend files from `web/`
+- **launch_manager_node**: ROS2 services to start/stop robot launch modes via subprocess
+
+### Launch
+```bash
+# On RPi5 (starts web stack only; select mode from browser):
+ros2 launch roscar_web web.launch.py
+
+# Access from any device on the same network:
+http://<robot-ip>:8888/
+```
+
+### Dashboard Tabs
+| Tab | Function |
+|-----|---------|
+| DRIVE | Dual virtual joystick (translate vx/vy + rotate wz), keyboard WASD+QE |
+| CAMERA | MJPEG live feed, quality/resolution selectors |
+| MAP | OccupancyGrid renderer, pan/zoom, click-to-navigate (Nav2 goal) |
+| STATUS | Position, velocity, orientation, battery gauge, active nodes |
+| SETTINGS | Mode switch (idle/teleop/slam/navigation/slam_nav), map save |
+
+### Services (provided by launch_manager_node)
+| Service | Type | Description |
+|---------|------|-------------|
+| `/web/set_mode` | `roscar_interfaces/SetMode` | Switch robot launch mode |
+| `/web/save_map` | `roscar_interfaces/SaveMap` | Save current SLAM map |
+| `/web/get_status` | `roscar_interfaces/GetStatus` | Query current mode/nodes |
+
+### Web Frontend Files
+```
+roscar_ws/src/roscar_web/web/
+├── index.html          # Single-page app
+├── css/style.css       # Industrial mission-control theme
+└── js/
+    ├── lib/roslib.min.js      # vendored roslibjs
+    ├── lib/nipplejs.min.js    # vendored nipplejs joystick
+    ├── app.js          # Entry: ROS connection, tabs, E-STOP
+    ├── teleop.js       # Joystick + keyboard -> /cmd_vel
+    ├── camera.js       # MJPEG stream from web_video_server
+    ├── status.js       # Subscribe odometry/IMU/battery
+    ├── lidar.js        # /scan mini radar on drive tab
+    ├── map.js          # OccupancyGrid canvas + nav goals
+    └── modes.js        # Mode switching + map save services
+```
+
+### Install Dependencies (in addition to SLAM deps)
+```bash
+sudo apt install ros-jazzy-rosbridge-suite ros-jazzy-web-video-server
+```
 
 ## Build & Run
 
