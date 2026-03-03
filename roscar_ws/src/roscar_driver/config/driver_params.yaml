@@ -16,5 +16,11 @@ roscar_driver:
     max_linear_y: 1.0
     max_angular_z: 5.0
 
+    # Steering trim: compensate for mechanical pull when driving straight.
+    # Units: rad/s of yaw correction per m/s of forward speed.
+    # Negative = correct leftward pull, positive = correct rightward pull.
+    # Tune live: ros2 param set /roscar_driver yaw_trim <value>
+    yaw_trim: 0.0
+
     # Publish rate for sensor data (Hz)
     pub_rate: 20.0

@@ -56,6 +56,7 @@ class RoscarDriverNode(Node):
         self.declare_parameter('max_angular_z', 5.0)   # rad/s
         self.declare_parameter('pub_rate', 20.0)       # Hz
         self.declare_parameter('gyro_cal_seconds', 2.0)  # startup calibration
+        self.declare_parameter('yaw_trim', 0.0)  # rad/s per m/s forward speed
 
         # -- Read parameters --
         serial_port = self.get_parameter('serial_port').value
@@ -171,6 +172,12 @@ class RoscarDriverNode(Node):
         vx = self._clamp(msg.linear.x, self._max_vx)
         vy = self._clamp(msg.linear.y, self._max_vy)
         wz = self._clamp(msg.angular.z, self._max_wz)
+
+        # Steering trim: compensate for mechanical pull (proportional to
+        # forward speed so it scales naturally and reverses when backing up).
+        # Tune with: ros2 param set /roscar_driver yaw_trim <value>
+        yaw_trim = self.get_parameter('yaw_trim').value
+        wz += yaw_trim * vx
 
         if self._bot is not None:
             self._bot.set_car_motion(-vx, -vy, -wz)
