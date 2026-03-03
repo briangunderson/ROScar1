@@ -46,6 +46,8 @@ def generate_launch_description():
     )
 
     # -- Lifecycle manager to auto-activate slam_toolbox --
+    # bond_timeout=0.0 disables bond heartbeat monitoring, which
+    # slam_toolbox does not implement (would cause a spurious error).
     lifecycle_manager = Node(
         package='nav2_lifecycle_manager',
         executable='lifecycle_manager',
@@ -54,6 +56,7 @@ def generate_launch_description():
         parameters=[{
             'autostart': True,
             'node_names': ['slam_toolbox'],
+            'bond_timeout': 0.0,
         }],
     )
 
