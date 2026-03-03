@@ -8,7 +8,7 @@ A ROS2 Jazzy workspace for a 4WD Mecanum wheel robot built on:
 - **RPLIDAR C1** (Slamtec) for 2D laser scanning, connected via USB
 - **4x DC encoder motors** with mecanum wheels
 
-**Status**: Milestones 1-4 config complete. Teleop, camera, EKF verified on hardware. SLAM + Nav2 configs written, pending on-robot testing.
+**Status**: Milestones 1-3 fully verified. Milestone 4 SLAM mapping verified on hardware (slam_toolbox publishing /map). Nav2 navigation pending testing.
 
 ## Architecture
 The STM32 board handles PID motor control and mecanum inverse kinematics internally.
@@ -103,8 +103,11 @@ Key: EKF owns odom->base_footprint TF (driver publish_odom_tf=false)
 - **AMCL OmniMotionModel**: Required for mecanum localization
 - **RPi5-tuned**: controller 10Hz, local costmap 5Hz, global costmap 1Hz
 
+### Lifecycle Management (IMPORTANT)
+In ROS2 Jazzy, `async_slam_toolbox_node` is a **lifecycle node**. It starts in "unconfigured" state and will NOT process scans or publish /map until explicitly transitioned through configure → activate. The `slam.launch.py` uses a `nav2_lifecycle_manager` with `autostart: True` and `bond_timeout: 0.0` (slam_toolbox doesn't implement the Nav2 bond interface). The `slam_nav.launch.py` and `navigation.launch.py` get lifecycle management from nav2_bringup's built-in lifecycle manager.
+
 ### Three Launch Modes
-1. **SLAM mapping** (`slam.launch.py`): Drive with teleop to build map
+1. **SLAM mapping** (`slam.launch.py`): Drive with teleop to build map (8 nodes: 7 robot + lifecycle_manager)
 2. **Navigation** (`navigation.launch.py map:=<path>`): Navigate on saved map
 3. **SLAM + Nav2** (`slam_nav.launch.py`): Map and navigate simultaneously
 
@@ -181,7 +184,9 @@ All sensor/command data is corrected at the hardware boundary in driver_node.py:
 
 ## TODO
 - [ ] Measure actual robot dimensions and update URDF (current values are PLACEHOLDERS)
-- [ ] Deploy SLAM + Nav2 to RPi5 and test mapping
+- [x] Deploy SLAM to RPi5 and test mapping (verified: /map publishing, lifecycle auto-activate working)
+- [ ] Save first map and test Nav2 navigation
+- [ ] Verify holonomic motion (strafing) during navigation
 - [ ] Camera calibration for undistorted images
 - [ ] Fine-tune EKF covariances under dynamic conditions
 - [ ] Update Nav2 robot footprint after measuring real dimensions

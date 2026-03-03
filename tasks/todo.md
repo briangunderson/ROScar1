@@ -32,6 +32,7 @@
 - [x] slam_nav.launch.py (SLAM + Nav2 combined for explore-and-navigate)
 - [x] Package deps updated (slam_toolbox, navigation2, nav2_bringup)
 - [x] setup_rpi.sh updated with new apt packages
-- [ ] Deploy to RPi5 and test SLAM mapping
+- [x] Deploy to RPi5 and test SLAM mapping (lifecycle fix: nav2_lifecycle_manager + bond_timeout=0.0)
+- [x] SLAM verified: /map publishing (74×135 cells @ 5cm), map->odom TF, all 8 nodes running
 - [ ] Save first map and test Nav2 navigation
 - [ ] Verify holonomic motion (strafing) during navigation
