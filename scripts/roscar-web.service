@@ -1,0 +1,25 @@
+[Unit]
+Description=ROScar1 Web Dashboard (rosbridge + video + launch_manager + http)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=brian
+Environment=HOME=/home/brian
+ExecStart=/home/brian/ROScar1/scripts/roscar-web.sh
+Restart=on-failure
+RestartSec=5
+
+# Give ROS2 nodes time to shut down gracefully
+TimeoutStopSec=15
+KillMode=mixed
+KillSignal=SIGINT
+
+# Logging to journalctl
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=roscar-web
+
+[Install]
+WantedBy=multi-user.target
