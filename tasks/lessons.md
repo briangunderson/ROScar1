@@ -53,6 +53,17 @@
 - The `slam_nav.launch.py` and `navigation.launch.py` don't need this because they use `nav2_bringup`'s `bringup_launch.py` which includes its own lifecycle manager with `autostart: true`
 - When deploying new files via `colcon build --symlink-install` for ament_cmake packages, must do a CLEAN rebuild (delete build/ and install/ for that package) — incremental builds don't pick up new files
 
+## ES Module Circular Imports (roscar_web JS)
+- `app.js` (module) has circular imports with teleop.js, status.js, lidar.js, map.js, modes.js
+- `export function foo()` declarations in app.js ARE hoisted/available even to circular importers
+- BUT `const moduleCallbacks = []` is NOT initialized until app.js's module body executes
+- Calling `onAppEvent(cb)` at MODULE LEVEL in any sub-module (outside a function) will throw
+  `ReferenceError: Cannot access 'moduleCallbacks' before initialization`
+- This silently crashes the entire module graph — page renders HTML/CSS but JS does nothing
+- **Rule**: NEVER call `onAppEvent()` at module level. Always register inside an `init*()` function.
+- Sub-module init functions (initTeleop, initStatus, etc.) are called AFTER app.js fully evaluates,
+  so `moduleCallbacks` is already initialized — safe to call `onAppEvent()` inside them.
+
 ## udev
 - CH340 (1a86:7523) → /dev/roscar_board (motor board)
 - CP210x (10c4:ea60) → /dev/rplidar (RPLIDAR C1)

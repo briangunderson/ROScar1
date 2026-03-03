@@ -17,6 +17,10 @@ export function initStatus(getRosFn) {
   onAppEvent((ev) => {
     if (ev === 'connected') subscribeAll();
   });
+  // Register tab-change handler here (avoids circular-import TDZ at module load)
+  onAppEvent((ev, tab) => {
+    if (ev === 'tabchange' && tab === 'status') refreshNodeList();
+  });
 }
 
 function subscribeAll() {
@@ -123,11 +127,6 @@ function setEl(id, val) {
 function fmtSigned(n, decimals) {
   return (n >= 0 ? '+' : '') + n.toFixed(decimals);
 }
-
-onAppEvent((ev, tab) => {
-  // Node list update when switching to status tab
-  if (ev === 'tabchange' && tab === 'status') refreshNodeList();
-});
 
 function refreshNodeList() {
   const ros = getRos();
