@@ -26,7 +26,7 @@ export function initMap(getRosFn) {
   getRos = getRosFn;
   setupControls();
   onAppEvent((ev, tab) => {
-    if (ev === 'connected') { subscribeMap(); subscribePose(); setupGoalClient(); }
+    if (ev === 'connected') { subscribeMap(); subscribePose(); }
     if (ev === 'tabchange' && tab === 'map') { sizeCanvas(); drawMap(); }
   });
   window.addEventListener('resize', () => { sizeCanvas(); drawMap(); });
@@ -288,6 +288,7 @@ function cancelGoal() {
 
 function setNavGoalMode(on) {
   navGoalMode = on;
+  if (on && !goalActionClient) setupGoalClient();
   const hint = document.getElementById('nav-goal-hint');
   const btn  = document.getElementById('cancel-goal-btn');
   if (hint) hint.classList.toggle('hidden', !on);
