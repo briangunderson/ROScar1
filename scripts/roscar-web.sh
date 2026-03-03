@@ -9,4 +9,8 @@ set -eo pipefail
 source /opt/ros/jazzy/setup.bash
 source "$HOME/roscar_ws/install/setup.bash"
 
+# Use CycloneDDS for cross-machine discovery (Pi <-> dev workstation)
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+export CYCLONEDDS_URI=file://$HOME/cyclonedds.xml
+
 exec ros2 launch roscar_web web.launch.py
