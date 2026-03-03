@@ -145,10 +145,17 @@ ros2 launch roscar_bringup navigation.launch.py map:=$HOME/maps/my_map.yaml
 - **http_server_node** port 8888: serves static frontend files from `web/`
 - **launch_manager_node**: ROS2 services to start/stop robot launch modes via subprocess
 
-### Launch
+### Launch (auto-start on boot)
+The web stack starts automatically via systemd:
 ```bash
-# On RPi5 (starts web stack only; select mode from browser):
-ros2 launch roscar_web web.launch.py
+# Service: roscar-web.service (enabled, starts on boot)
+sudo systemctl status roscar-web   # check status
+sudo systemctl restart roscar-web  # restart
+sudo journalctl -u roscar-web -f   # follow logs
+
+# Manual install (already done on Pi):
+sudo cp ~/ROScar1/scripts/roscar-web.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable roscar-web
 
 # Access from any device on the same network:
 http://<robot-ip>:8888/
