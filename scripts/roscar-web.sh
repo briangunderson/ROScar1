@@ -4,7 +4,7 @@
 # launch_manager + http_server).  Called by the roscar-web.service
 # systemd unit on boot.
 #
-set -euo pipefail
+set -eo pipefail
 
 source /opt/ros/jazzy/setup.bash
 source "$HOME/roscar_ws/install/setup.bash"
