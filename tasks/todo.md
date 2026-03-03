@@ -25,6 +25,13 @@
 - [x] Verified: 0 NaN errors, position stable at origin when stationary, all topics 20Hz
 
 ## Milestone 4: SLAM + Navigation
-- [ ] SLAM Toolbox config
-- [ ] Nav2 config
-- [ ] Navigation launch files
+- [x] slam_toolbox config (online_async, 5cm resolution, RPLIDAR C1 tuned)
+- [x] Nav2 config (DWB holonomic controller, SmacPlanner2D, AMCL OmniMotionModel, RPi5-tuned)
+- [x] slam.launch.py (SLAM-only mapping with teleop)
+- [x] navigation.launch.py (saved map + AMCL + Nav2)
+- [x] slam_nav.launch.py (SLAM + Nav2 combined for explore-and-navigate)
+- [x] Package deps updated (slam_toolbox, navigation2, nav2_bringup)
+- [x] setup_rpi.sh updated with new apt packages
+- [ ] Deploy to RPi5 and test SLAM mapping
+- [ ] Save first map and test Nav2 navigation
+- [ ] Verify holonomic motion (strafing) during navigation

@@ -8,7 +8,7 @@ A ROS2 Jazzy workspace for a 4WD Mecanum wheel robot built on:
 - **RPLIDAR C1** (Slamtec) for 2D laser scanning, connected via USB
 - **4x DC encoder motors** with mecanum wheels
 
-**Status**: Milestones 1-3 complete. Teleop driving, camera streaming, and EKF sensor fusion all verified on hardware.
+**Status**: Milestones 1-4 config complete. Teleop, camera, EKF verified on hardware. SLAM + Nav2 configs written, pending on-robot testing.
 
 ## Architecture
 The STM32 board handles PID motor control and mecanum inverse kinematics internally.
@@ -47,6 +47,11 @@ Key: EKF owns odom->base_footprint TF (driver publish_odom_tf=false)
 | `roscar_ws/src/roscar_bringup/launch/robot.launch.py` | Full robot bringup |
 | `roscar_ws/src/roscar_bringup/launch/teleop.launch.py` | Teleop + full robot |
 | `roscar_ws/src/roscar_bringup/config/ekf.yaml` | EKF sensor fusion config |
+| `roscar_ws/src/roscar_bringup/config/slam_toolbox.yaml` | slam_toolbox online_async config |
+| `roscar_ws/src/roscar_bringup/config/nav2_params.yaml` | Nav2 full stack config (DWB holonomic) |
+| `roscar_ws/src/roscar_bringup/launch/slam.launch.py` | SLAM mapping (teleop + slam_toolbox) |
+| `roscar_ws/src/roscar_bringup/launch/navigation.launch.py` | Nav2 on saved map |
+| `roscar_ws/src/roscar_bringup/launch/slam_nav.launch.py` | SLAM + Nav2 combined |
 | `scripts/setup_rpi.sh` | RPi5 initial setup script |
 
 ## Packages
@@ -72,6 +77,9 @@ Key: EKF owns odom->base_footprint TF (driver publish_odom_tf=false)
 | `/odometry/filtered` | Odometry | ekf_node | Fused odometry (wheels+IMU) |
 | `/image_raw` | Image | v4l2_camera | Camera feed (640x480, 30fps) |
 | `/camera_info` | CameraInfo | v4l2_camera | Camera calibration info |
+| `/map` | OccupancyGrid | slam_toolbox | SLAM-generated map |
+| `/plan` | Path | planner_server | Global navigation path |
+| `/local_plan` | Path | controller_server | Local trajectory |
 
 ## Rosmaster_Lib API (Key Methods)
 - `Rosmaster(car_type=1, com='/dev/roscar_board', delay=0.002)` - Constructor
@@ -85,6 +93,41 @@ Key: EKF owns odom->base_footprint TF (driver publish_odom_tf=false)
 - `get_motor_encoder()` -> (m1, m2, m3, m4) - Raw encoder counts
 - `reset_car_state()` - Stop motors, lights off, buzzer off
 - `car_type=1` for mecanum (X3)
+
+## SLAM + Navigation
+
+### Design Choices
+- **slam_toolbox online_async**: RPi5-friendly async processing
+- **DWB controller**: Holonomic support (min_vel_y for mecanum strafing)
+- **SmacPlanner2D**: No min turning radius (holonomic)
+- **AMCL OmniMotionModel**: Required for mecanum localization
+- **RPi5-tuned**: controller 10Hz, local costmap 5Hz, global costmap 1Hz
+
+### Three Launch Modes
+1. **SLAM mapping** (`slam.launch.py`): Drive with teleop to build map
+2. **Navigation** (`navigation.launch.py map:=<path>`): Navigate on saved map
+3. **SLAM + Nav2** (`slam_nav.launch.py`): Map and navigate simultaneously
+
+### Map Workflow
+```bash
+# 1. Build a map
+ros2 launch roscar_bringup slam.launch.py
+# (drive around with teleop in another terminal)
+
+# 2. Save the map
+ros2 run nav2_map_server map_saver_cli -f ~/maps/my_map
+
+# 3. Navigate on saved map
+ros2 launch roscar_bringup navigation.launch.py map:=$HOME/maps/my_map.yaml
+# (use rviz2: 2D Pose Estimate -> 2D Goal Pose)
+```
+
+### Nav2 Velocity Limits
+| Axis | Min | Max | Unit |
+|------|-----|-----|------|
+| vx | -0.2 | 0.5 | m/s |
+| vy | -0.3 | 0.3 | m/s (strafing) |
+| wz | -2.0 | 2.0 | rad/s |
 
 ## Build & Run
 
@@ -100,6 +143,15 @@ ros2 launch roscar_bringup teleop.launch.py
 
 # Camera:
 ros2 launch roscar_bringup camera.launch.py
+
+# SLAM mapping:
+ros2 launch roscar_bringup slam.launch.py
+
+# Navigation on saved map:
+ros2 launch roscar_bringup navigation.launch.py map:=$HOME/maps/my_map.yaml
+
+# SLAM + Nav2 combined:
+ros2 launch roscar_bringup slam_nav.launch.py
 
 # Visualize from dev machine:
 rviz2 -d roscar_ws/src/roscar_description/rviz/roscar.rviz
@@ -128,7 +180,9 @@ All sensor/command data is corrected at the hardware boundary in driver_node.py:
 | Magnetometer | negate mx, my; keep mz |
 
 ## TODO
-- [ ] Measure actual robot dimensions and update URDF
-- [ ] Add SLAM (slam_toolbox) and Nav2 configuration
+- [ ] Measure actual robot dimensions and update URDF (current values are PLACEHOLDERS)
+- [ ] Deploy SLAM + Nav2 to RPi5 and test mapping
 - [ ] Camera calibration for undistorted images
 - [ ] Fine-tune EKF covariances under dynamic conditions
+- [ ] Update Nav2 robot footprint after measuring real dimensions
+- [ ] Tune Nav2 velocity/acceleration limits based on real-world testing

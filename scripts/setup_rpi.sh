@@ -45,6 +45,9 @@ apt install -y \
     ros-jazzy-xacro \
     ros-jazzy-robot-state-publisher \
     ros-jazzy-joint-state-publisher \
+    ros-jazzy-slam-toolbox \
+    ros-jazzy-navigation2 \
+    ros-jazzy-nav2-bringup \
     python3-serial
 
 # ---- 4. Initialize rosdep ----
