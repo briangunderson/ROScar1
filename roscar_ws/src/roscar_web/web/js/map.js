@@ -93,11 +93,12 @@ function sizeCanvas() {
 function fitMapToCanvas() {
   if (!mapData) return;
   const c = getCanvas(); if (!c) return;
-  const scaleX = c.width  / mapData.width;
-  const scaleY = c.height / mapData.height;
+  // After 90° CCW rotation: map height spans screen X, map width spans screen Y
+  const scaleX = c.width  / mapData.height;
+  const scaleY = c.height / mapData.width;
   viewScale = Math.min(scaleX, scaleY) * 0.9;
-  viewOffset.x = (c.width  - mapData.width  * viewScale) / 2;
-  viewOffset.y = (c.height - mapData.height * viewScale) / 2;
+  viewOffset.x = (c.width  - mapData.height * viewScale) / 2;
+  viewOffset.y = (c.height - mapData.width  * viewScale) / 2;
 }
 
 // ── Drawing ────────────────────────────────────────────────────────────────
@@ -139,9 +140,10 @@ function drawMap() {
   ctx.save();
   ctx.translate(viewOffset.x, viewOffset.y);
   ctx.scale(viewScale, viewScale);
-  // Map is stored bottom-up in ROS; flip Y
-  ctx.translate(0, mapData.height);
-  ctx.scale(1, -1);
+  // 90° CCW rotation: forward (ROS +X) → screen UP, left (ROS +Y) → screen LEFT
+  ctx.translate(mapData.height, mapData.width);
+  ctx.rotate(Math.PI / 2);
+  ctx.scale(-1, 1);
   ctx.drawImage(offscreen, 0, 0);
   ctx.restore();
 
@@ -152,19 +154,20 @@ function drawMap() {
 }
 
 function drawRobotPose(ctx) {
-  // Convert world coords to canvas coords
-  const ox = mapData.origin.x;
-  const oy = mapData.origin.y;
+  // Convert world coords to canvas coords (90° CCW rotated view)
+  const ox  = mapData.origin.x;
+  const oy  = mapData.origin.y;
   const res = mapData.resolution;
+  const w   = mapData.width;
   const h   = mapData.height;
 
-  // Map pixel coords (bottom-up)
+  // Map pixel coords
   const mpx = (robotPos.x - ox) / res;
   const mpy = (robotPos.y - oy) / res;
 
-  // Screen coords (Y flipped)
-  const sx = viewOffset.x + mpx * viewScale;
-  const sy = viewOffset.y + (h - mpy) * viewScale;
+  // Screen coords: forward(+mpx)→UP, left(+mpy)→LEFT
+  const sx = viewOffset.x + (h - mpy) * viewScale;
+  const sy = viewOffset.y + (w - mpx) * viewScale;
 
   ctx.save();
   ctx.translate(sx, sy);
@@ -245,9 +248,9 @@ function setupControls() {
 function sendNavGoal(canvasX, canvasY) {
   if (!goalActionClient) { toast('Nav2 not connected', 'err'); return; }
 
-  // Canvas → map pixel → world
-  const mpx = (canvasX - viewOffset.x) / viewScale;
-  const mpy = mapData.height - (canvasY - viewOffset.y) / viewScale;
+  // Canvas → map pixel → world (inverse of 90° CCW rotated view)
+  const mpx = mapData.width  - (canvasY - viewOffset.y) / viewScale;
+  const mpy = mapData.height - (canvasX - viewOffset.x) / viewScale;
   const wx  = mapData.origin.x + mpx * mapData.resolution;
   const wy  = mapData.origin.y + mpy * mapData.resolution;
 
