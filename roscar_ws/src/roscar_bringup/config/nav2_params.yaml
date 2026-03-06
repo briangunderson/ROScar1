@@ -100,13 +100,13 @@ controller_server:
       plugin: dwb_core::DWBLocalPlanner
       debug_trajectory_details: true
       # -- Velocity limits (mecanum holonomic) --
-      min_vel_x: -0.6
-      max_vel_x: 1.5
-      min_vel_y: -0.9               # Mecanum strafing!
-      max_vel_y: 0.9                # Mecanum strafing!
-      max_vel_theta: 4.0
+      min_vel_x: -0.4
+      max_vel_x: 0.8
+      min_vel_y: -0.5               # Mecanum strafing!
+      max_vel_y: 0.5                # Mecanum strafing!
+      max_vel_theta: 3.0
       min_speed_xy: 0.0
-      max_speed_xy: 1.5
+      max_speed_xy: 0.8
       min_speed_theta: 0.0
       acc_lim_x: 1.0
       acc_lim_y: 1.0
@@ -200,10 +200,10 @@ velocity_smoother:
     smoothing_frequency: 20.0
     scale_velocities: false
     feedback: OPEN_LOOP
-    max_velocity: [1.5, 0.9, 4.0]     # vx, vy, wz
-    min_velocity: [-0.6, -0.9, -4.0]
-    max_accel: [2.5, 2.5, 5.0]
-    max_decel: [-2.5, -2.5, -5.0]
+    max_velocity: [0.8, 0.5, 3.0]     # vx, vy, wz
+    min_velocity: [-0.4, -0.5, -3.0]
+    max_accel: [1.5, 1.5, 3.0]
+    max_decel: [-1.5, -1.5, -3.0]
     odom_topic: /odometry/filtered
     odom_duration: 0.1
     deadband_velocity: [0.0, 0.0, 0.0]
