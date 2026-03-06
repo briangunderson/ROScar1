@@ -21,7 +21,7 @@
 
   <!-- Lidar position (relative to base_link) -->
   <xacro:property name="lidar_x" value="0.0"/>
-  <xacro:property name="lidar_z" value="0.12"/>  <!-- top of chassis -->
+  <xacro:property name="lidar_z" value="0.09"/>  <!-- top platform, scan plane ~18cm from floor -->
 
   <!-- ==================== Materials ==================== -->
   <material name="dark_grey">

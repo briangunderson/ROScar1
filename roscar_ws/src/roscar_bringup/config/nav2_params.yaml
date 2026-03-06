@@ -252,7 +252,7 @@ local_costmap:
           raytrace_max_range: 3.0
           raytrace_min_range: 0.0
           obstacle_max_range: 2.5
-          obstacle_min_range: 0.20    # Filter out lidar self-reflections from chassis
+          obstacle_min_range: 0.0
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         cost_scaling_factor: 10.0
@@ -288,7 +288,7 @@ global_costmap:
           raytrace_max_range: 12.0
           raytrace_min_range: 0.0
           obstacle_max_range: 10.0
-          obstacle_min_range: 0.20    # Filter out lidar self-reflections from chassis
+          obstacle_min_range: 0.0
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         cost_scaling_factor: 10.0
