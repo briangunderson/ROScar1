@@ -8,7 +8,7 @@ A ROS2 Jazzy workspace for a 4WD Mecanum wheel robot built on:
 - **RPLIDAR C1** (Slamtec) for 2D laser scanning, connected via USB
 - **4x DC encoder motors** with mecanum wheels
 
-**Status**: Milestones 1-3 fully verified. Milestone 4 SLAM mapping verified on hardware (slam_toolbox publishing /map). Nav2 navigation pending testing. Web dashboard implemented (roscar_web package + roscar_interfaces).
+**Status**: Milestones 1-3 fully verified. Milestone 4 SLAM + Nav2 verified on hardware (slam_toolbox publishing /map, Nav2 accepting and completing navigation goals). Web dashboard implemented (roscar_web package + roscar_interfaces).
 
 ## Architecture
 The STM32 board handles PID motor control and mecanum inverse kinematics internally.
@@ -47,6 +47,7 @@ Key: EKF owns odom->base_footprint TF (driver publish_odom_tf=false)
 | `roscar_ws/src/roscar_bringup/launch/robot.launch.py` | Full robot bringup |
 | `roscar_ws/src/roscar_bringup/launch/teleop.launch.py` | Teleop + full robot |
 | `roscar_ws/src/roscar_bringup/config/ekf.yaml` | EKF sensor fusion config |
+| `roscar_ws/src/roscar_bringup/config/laser_filter.yaml` | Laser range filter (drops chassis reflections < 0.15m) |
 | `roscar_ws/src/roscar_bringup/config/slam_toolbox.yaml` | slam_toolbox online_async config |
 | `roscar_ws/src/roscar_bringup/config/nav2_params.yaml` | Nav2 full stack config (DWB holonomic) |
 | `roscar_ws/src/roscar_bringup/launch/slam.launch.py` | SLAM mapping (teleop + slam_toolbox) |
@@ -78,7 +79,8 @@ Key: EKF owns odom->base_footprint TF (driver publish_odom_tf=false)
 | `/imu/data` | Imu | imu_filter_madgwick | Filtered IMU with orientation |
 | `/imu/mag` | MagneticField | roscar_driver | Magnetometer |
 | `/battery_voltage` | Float32 | roscar_driver | Battery level |
-| `/scan` | LaserScan | sllidar_node | RPLIDAR C1 laser scan |
+| `/scan_raw` | LaserScan | sllidar_node | RPLIDAR C1 raw laser scan (includes chassis reflections) |
+| `/scan` | LaserScan | laser_filter | Filtered scan (chassis reflections < 0.15m removed) |
 | `/odometry/filtered` | Odometry | ekf_node | Fused odometry (wheels+IMU) |
 | `/image_raw` | Image | v4l2_camera | Camera feed (640x480, 30fps) |
 | `/camera_info` | CameraInfo | v4l2_camera | Camera calibration info |
@@ -97,7 +99,36 @@ Key: EKF owns odom->base_footprint TF (driver publish_odom_tf=false)
 - `get_battery_voltage()` -> float
 - `get_motor_encoder()` -> (m1, m2, m3, m4) - Raw encoder counts
 - `reset_car_state()` - Stop motors, lights off, buzzer off
-- `car_type=1` for mecanum (X3)
+
+### Car Type Constants
+| Value | Constant | Description |
+|-------|----------|-------------|
+| 0x01 | CARTYPE_X3 | 4WD Mecanum (our robot) |
+| 0x02 | CARTYPE_X3_PLUS | 4WD Mecanum Plus variant |
+| 0x04 | CARTYPE_X1 | 2WD differential drive |
+| 0x05 | CARTYPE_R2 | Ackermann steering |
+
+### Serial Protocol
+- USART1 via CH340 USB, 115200 baud, 8N1
+- Wire encoding: velocities × 1000 (mm/s and mrad/s on wire, int16)
+- Firmware velocity limits (X3 mecanum): vx ±1.0 m/s, vy ±1.0 m/s, wz ±5.0 rad/s
+- Auto-report: 4 data packets (speed, IMU, encoder, etc.) every 10ms each (~40ms full cycle)
+
+### IMU Sensor
+- **V3.0 board uses ICM20948** (not MPU9250). Library auto-detects.
+- ICM20948 conversion: firmware pre-scales, library divides by 1/1000.0 (all axes)
+- MPU9250 conversion: gyro 1/3754.9, accel 1/1671.84
+- MPU9250 library negates gy, gz internally; ICM20948 has no library-layer negation
+- I2C on GPIO bit-bang: PB15 (SDA), PB13 (SCL), addr 0x68
+
+### Encoder Specs
+- 1320 counts per revolution (30:1 gear × 11 PPR × 4x quadrature)
+- 16-bit counter, read every 10ms (100Hz PID loop)
+- Motors: M1=front-left (TIM2), M2=rear-left (TIM4), M3=front-right (TIM5), M4=rear-right (TIM3)
+
+### Mecanum Wheel Installation (ABBA pattern)
+- Viewed from front: FL=A, FR=B, RL=B, RR=A (A/B are mirror-image 45° rollers)
+- Wheel dimensions (radius, L_x, L_y) NOT documented — embedded in firmware, physical measurement required
 
 ## SLAM + Navigation
 
@@ -110,6 +141,13 @@ Key: EKF owns odom->base_footprint TF (driver publish_odom_tf=false)
 
 ### Lifecycle Management (IMPORTANT)
 In ROS2 Jazzy, `async_slam_toolbox_node` is a **lifecycle node**. It starts in "unconfigured" state and will NOT process scans or publish /map until explicitly transitioned through configure → activate. The `slam.launch.py` uses a `nav2_lifecycle_manager` with `autostart: True` and `bond_timeout: 0.0` (slam_toolbox doesn't implement the Nav2 bond interface). The `slam_nav.launch.py` and `navigation.launch.py` get lifecycle management from nav2_bringup's built-in lifecycle manager.
+
+### Jazzy nav2_bringup Gotchas (CRITICAL)
+Jazzy's `nav2_bringup` `bringup_launch.py` includes **collision_monitor**, **docking_server**, and **route_server** by default. ALL must configure+activate successfully or the lifecycle manager aborts the entire navigation stack. The `nav2_params.yaml` MUST include configs for all three, even though we don't use docking or routing:
+- **collision_monitor**: Needs `observation_sources: ["scan"]` and polygon definitions
+- **docking_server**: Needs `dock_plugins: ['simple_charging_dock']` with plugin config
+- **route_server**: Needs `operations` list with plugin entries
+- When `slam:=True`, slam_toolbox params must be in nav2_params.yaml (under `slam_toolbox:` namespace), NOT in a separate file
 
 ### Three Launch Modes
 1. **SLAM mapping** (`slam.launch.py`): Drive with teleop to build map (8 nodes: 7 robot + lifecycle_manager)
@@ -227,6 +265,61 @@ ros2 launch roscar_bringup slam_nav.launch.py
 rviz2 -d roscar_ws/src/roscar_description/rviz/roscar.rviz
 ```
 
+## WSL2 Visualization (Dev Machine)
+
+### Setup
+ROS2 Jazzy Desktop is installed in WSL2 (Ubuntu 24.04) with WSLg for GUI forwarding.
+CycloneDDS unicast peer discovery bridges the Pi <-> WSL2 network.
+
+### Prerequisites
+- WSL2 mirrored networking: `networkingMode=mirrored` in `C:\Users\brian\.wslconfig`
+- ROS2 Jazzy Desktop + CycloneDDS installed (run `scripts/install_ros2_wsl.sh` in WSL terminal)
+- Windows Firewall: UDP ports 7400-7500 open (inbound + outbound)
+- Hyper-V Firewall: may need a UDP allow rule for DDS data transport
+
+### CycloneDDS Config
+Both Pi (`~/cyclonedds.xml`) and WSL2 (`~/cyclonedds.xml`) use unicast peer discovery:
+- Pi peers: `localhost` + WSL2's LAN IP (e.g., 192.168.1.194)
+- WSL2 peers: `localhost` + Pi IP (192.168.1.170)
+- `AllowMulticast=false` (multicast doesn't reliably cross WSL2 boundary)
+- **CRITICAL**: WSL2 config MUST include `<Interfaces><NetworkInterface name="eth1" /></Interfaces>` — Docker Desktop creates bridge networks (docker0, br-*) that CycloneDDS may bind to instead of eth1, causing discovery to silently fail even though ping works
+
+### CRITICAL: ros2 daemon
+The ros2 daemon caches DDS discovery. If started before CycloneDDS env vars are set, it uses FastDDS and cross-machine discovery fails. Kill daemon with `pkill -f ros2.*daemon` and use `--no-daemon` for testing. `ros2 daemon stop` can itself hang if the daemon is in a bad state.
+
+### CRITICAL: WSL2 Distros
+Multiple WSL2 distros may exist (Ubuntu, Ubuntu-20.04, Ubuntu-24.04). ROS2 Jazzy is in `Ubuntu-24.04`, NOT the default `Ubuntu`. Always use `wsl -d Ubuntu-24.04` for ROS2 commands.
+
+### Running rviz2
+```bash
+# In WSL terminal (env vars should be in .bashrc):
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+export CYCLONEDDS_URI=file://$HOME/cyclonedds.xml
+source /opt/ros/jazzy/setup.bash
+rviz2 -d /mnt/d/localrepos/ROScar1/roscar_ws/src/roscar_description/rviz/roscar.rviz
+```
+
+### rviz Config Displays
+| Display | Topic | Default |
+|---------|-------|---------|
+| RobotModel | /robot_description | on |
+| TF | /tf | on |
+| LaserScan | /scan | on |
+| SLAM Map | /map | on |
+| Odometry (filtered) | /odometry/filtered | on |
+| Global Plan | /plan | on |
+| Local Plan | /local_plan | on |
+| Camera | /image_raw | off |
+
+### Useful CLI from WSL2
+```bash
+ros2 topic list --no-daemon         # List all Pi topics
+ros2 topic echo /scan --once --no-daemon  # Check lidar
+ros2 topic hz /odometry/filtered --no-daemon  # Odom rate
+ros2 run rqt_graph rqt_graph        # Node graph
+ros2 run rqt_tf_tree rqt_tf_tree    # TF tree
+```
+
 ## Hardware Notes
 
 ### RPLIDAR C1
@@ -244,16 +337,42 @@ All sensor/command data is corrected at the hardware boundary in driver_node.py:
 | Data | Correction |
 |------|-----------|
 | cmd_vel | `set_car_motion(-vx, -vy, -wz)` |
-| Wheel odom | negate vx, vy, vz from `get_motion_data()` |
+| Wheel odom | negate vx, vy ONLY; keep vz (Z-axis angular vel unchanged by yaw rotation) |
 | Accelerometer | negate ALL: ax, ay, az (180-deg + gravity sign convention) |
-| Gyroscope | negate gx, gy ONLY; keep gz (Z-axis unchanged by yaw rotation) |
+| Gyroscope | negate ALL: gx, gy, gz (board firmware reports gz inverted) |
 | Magnetometer | negate mx, my; keep mz |
+
+## Driver Features
+
+### Gyro Bias Calibration
+On startup, `driver_node.py` samples ~200 gyroscope readings over 1 second while stationary, computes the mean bias, and subtracts it from all subsequent readings. Reduces yaw drift from ~0.11°/s to ~0.0015°/s (73x improvement).
+
+### Yaw Trim
+`yaw_trim` parameter compensates for mechanical pull when driving straight. Applied proportionally to forward speed: `wz += yaw_trim * vx`. Tune live: `ros2 param set /roscar_driver yaw_trim -0.03`. Negative = correct leftward pull.
+
+### Velocity Smoothing (Deceleration Limiter)
+The robot is top-heavy with a short wheelbase and tips over on abrupt stops. The driver limits deceleration rate so the robot slows down gently:
+- `max_decel_linear`: 1.0 m/s² (default) — linear deceleration limit
+- `max_decel_angular`: 3.0 rad/s² (default) — angular deceleration limit
+- Acceleration is unlimited (instant response when speeding up)
+- A 50Hz ramp timer smoothly moves current velocity toward the target
+- The watchdog sets target to zero; the ramp handles the smooth stop
+- Tune live: `ros2 param set /roscar_driver max_decel_linear 0.5`
+
+### IMU → EKF Integration
+The EKF uses `imu/data_raw` directly (bypassing Madgwick filter) for angular velocity fusion. The driver sets an identity orientation quaternion (0,0,0,1) on imu/data_raw so robot_localization's frame transform is a no-op. This avoids a subtle bug where negating gyro gz corrects the angular velocity sign but breaks Madgwick's internal orientation quaternion, which robot_localization uses for frame transforms even when orientation fusion is disabled.
 
 ## TODO
 - [ ] Measure actual robot dimensions and update URDF (current values are PLACEHOLDERS)
 - [x] Deploy SLAM to RPi5 and test mapping (verified: /map publishing, lifecycle auto-activate working)
-- [ ] Save first map and test Nav2 navigation
+- [x] WSL2 rviz2 visualization working (CycloneDDS unicast, all topics visible)
+- [x] Nav2 slam_nav mode verified on hardware (all lifecycle nodes active, collision_monitor + docking_server + route_server configured)
+- [x] Laser filter added to remove chassis self-reflections from RPLIDAR scan (< 0.15m)
+- [x] Nav2 click-to-navigate verified (2D Goal Pose → planner → DWB controller → goal reached)
+- [ ] Save first map and test navigation-only mode (navigation.launch.py)
 - [ ] Verify holonomic motion (strafing) during navigation
+- [ ] Tighten xy_goal_tolerance (currently 0.25m — robot declares success 25cm from target)
+- [ ] Tune yaw_trim parameter for straight driving
 - [ ] Camera calibration for undistorted images
 - [ ] Fine-tune EKF covariances under dynamic conditions
 - [ ] Update Nav2 robot footprint after measuring real dimensions
