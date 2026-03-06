@@ -39,7 +39,7 @@ def generate_launch_description():
         ),
     )
 
-    # -- RPLIDAR C1 --
+    # -- RPLIDAR C1 (publishes to /scan_raw, filtered by laser_filter) --
     lidar_node = Node(
         package='sllidar_ros2',
         executable='sllidar_node',
@@ -53,6 +53,19 @@ def generate_launch_description():
             'angle_compensate': True,
             'scan_mode': 'Standard',
         }],
+        remappings=[('scan', 'scan_raw')],
+        output='screen',
+        condition=IfCondition(LaunchConfiguration('use_lidar')),
+    )
+
+    # -- Laser range filter (drops chassis self-reflections < 0.15m) --
+    laser_filter_config = os.path.join(bringup_dir, 'config', 'laser_filter.yaml')
+    laser_filter_node = Node(
+        package='laser_filters',
+        executable='scan_to_scan_filter_chain',
+        name='laser_filter',
+        parameters=[laser_filter_config],
+        remappings=[('scan', 'scan_raw'), ('scan_filtered', 'scan')],
         output='screen',
         condition=IfCondition(LaunchConfiguration('use_lidar')),
     )
@@ -83,6 +96,7 @@ def generate_launch_description():
         description_launch,
         driver_launch,
         lidar_node,
+        laser_filter_node,
         imu_filter_node,
         ekf_node,
     ])

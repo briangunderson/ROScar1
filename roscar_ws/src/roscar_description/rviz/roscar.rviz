@@ -12,29 +12,89 @@ Visualization Manager:
       Name: RobotModel
       Description Topic:
         Value: /robot_description
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
       Value: true
     - Class: rviz_default_plugins/TF
       Name: TF
       Value: true
     - Class: rviz_default_plugins/Odometry
-      Name: Odometry
+      Name: Odometry (raw)
       Topic:
         Value: /odom_raw
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Value: false
+    - Class: rviz_default_plugins/Odometry
+      Name: Odometry (filtered)
+      Topic:
+        Value: /odometry/filtered
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
       Value: true
     - Class: rviz_default_plugins/LaserScan
       Name: LaserScan
       Topic:
         Value: /scan
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Best Effort
+      Value: true
+    - Class: rviz_default_plugins/Map
+      Name: SLAM Map
+      Topic:
+        Value: /map
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Update Topic:
+        Value: /map_updates
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Value: true
+    - Class: rviz_default_plugins/Path
+      Name: Global Plan
+      Topic:
+        Value: /plan
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Value: true
+    - Class: rviz_default_plugins/Path
+      Name: Local Plan
+      Topic:
+        Value: /local_plan
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
       Value: true
     - Class: rviz_default_plugins/Image
       Name: Camera
       Topic:
         Value: /image_raw
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Best Effort
       Value: false
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+    - Class: rviz_default_plugins/SetInitialPose
+      Topic:
+        Value: /initialpose
+    - Class: rviz_default_plugins/SetGoal
+      Topic:
+        Value: /goal_pose
   Global Options:
-    Fixed Frame: odom
+    Fixed Frame: map
   Views:
     Current:
       Class: rviz_default_plugins/ThirdPersonFollower
-      Distance: 2.0
+      Distance: 3.0
       Target Frame: base_link
