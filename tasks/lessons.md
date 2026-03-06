@@ -121,7 +121,8 @@
 - Docker Desktop installs bridge networks (docker0, br-*) inside WSL2
 - CycloneDDS without explicit `<Interfaces>` may bind to docker0 or loopback instead of eth1
 - **Symptom**: `ros2 topic list` hangs/times out even though ping to remote host works
-- **Fix**: Add `<Interfaces><NetworkInterface name="eth1" /></Interfaces>` in `<General>` section of cyclonedds.xml
+- **Fix**: Add `<Interfaces><NetworkInterface name="eth0" /></Interfaces>` in `<General>` section of cyclonedds.xml
+- **NOTE**: The interface name can change between `eth0` and `eth1` after Windows/WSL updates or Docker Desktop changes. Check with `ip -4 addr show` to find which interface has the LAN IP.
 - The ros2 daemon caches DDS state — if started before env vars are set, it uses wrong RMW. Kill daemon and use `--no-daemon` for testing.
 - `ros2 daemon stop` can itself hang if the daemon was started with wrong config — use `pkill -f ros2.*daemon` instead
 - WSL2 has multiple distros (Ubuntu, Ubuntu-20.04, Ubuntu-24.04) — ROS2 Jazzy is only in Ubuntu-24.04, use `wsl -d Ubuntu-24.04`
@@ -151,6 +152,15 @@
 - Relaxed to `required_movement_radius: 0.15`, `movement_time_allowance: 20.0`
 - Default `xy_goal_tolerance: 0.25` means the robot is "at the goal" when within 25cm — may need tightening for precision
 - Goal at (0.30, 0.00) with map extent [−1.65, 0.25] causes "Goal Coordinates outside bounds" — the goal must be within the SLAM map
+
+## Nav2 Collision Monitor (CRITICAL)
+- Nav2 velocity pipeline: controller → `/cmd_vel_nav` → velocity_smoother → `/cmd_vel_smoothed` → collision_monitor → `/cmd_vel`
+- The collision_monitor sits LAST in the pipeline and can silently zero ALL velocity commands
+- A PolygonStop zone matching the robot footprint exactly (0.15m from center) with `min_points: 4` triggers on nearby wall returns
+- **Symptom**: controller publishes good velocities, smoother passes them through, but `/cmd_vel` is ALL zeros — robot won't move
+- The laser_filter drops returns < 0.15m, but returns at 0.15-0.20m still fall inside a tight polygon
+- **Fix**: Expand PolygonStop beyond footprint (0.20m) with high `min_points: 8`, add PolygonSlow (0.30m) for gradual deceleration
+- **Debugging tip**: `ros2 topic echo /cmd_vel_nav` vs `/cmd_vel` — if nav has velocities but cmd_vel is zero, collision_monitor is the culprit
 
 ## udev
 - CH340 (1a86:7523) → /dev/roscar_board (motor board)
