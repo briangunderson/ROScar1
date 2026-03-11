@@ -213,6 +213,10 @@ input[type=range]::-moz-range-thumb {
 /* ═══════════════════════════════════════════════════════
    PANEL: CAMERA
    ═══════════════════════════════════════════════════════ */
+#panel-camera {
+  position: relative;
+  z-index: 10000;          /* lift above body::after scanline overlay (z-index:9999) */
+}
 #panel-camera .panel-body {
   display: flex; flex-direction: column;
 }
