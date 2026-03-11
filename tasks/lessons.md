@@ -200,6 +200,16 @@
 - Motor mapping: M1=front-left, M2=rear-left, M3=front-right, M4=rear-right
 - To isolate motor vs board vs wiring: swap wires between ports and re-test. If the dead reading follows the motor, it's the motor/encoder. If it stays on the same port, it's the board.
 
+## robot_localization IMU Covariance Convention (CRITICAL)
+- robot_localization has TWO code paths that use IMU orientation: (1) measurement fusion (controlled by imu0_config), (2) internal processing like gravity removal and frame transforms (NOT controlled by imu0_config)
+- If `orientation_covariance[0]` is 0 (default), robot_localization may still process orientation internally even when orientation fusion is disabled in the config
+- Setting `orientation_covariance[0] = -1` is the ROS convention for "this sensor doesn't produce orientation data" — robot_localization explicitly checks for this and skips ALL orientation processing
+- Same convention applies to `linear_acceleration_covariance[0] = -1` ("no accel data") and `angular_velocity_covariance[0] = -1` ("no gyro data")
+- `imu0_remove_gravitational_acceleration: true` has documented bug history (Issues #223, #501) — when combined with synthetic identity orientation and zero covariance, it can cause EKF divergence. Set to `false` when not fusing acceleration.
+- **Symptom**: EKF angular.z explodes to millions of rad/s within minutes, even with sane inputs (zero odom, ~0.01 rad/s gyro noise)
+- **Fix**: Set orientation_covariance[0]=-1 and linear_acceleration_covariance[0]=-1 in IMU message, and imu0_remove_gravitational_acceleration=false in EKF config
+- **Rule**: When using robot_localization with IMU, explicitly mark unused data channels with covariance[0]=-1. Don't rely on disabling fusion in the config alone.
+
 ## udev
 - CH340 (1a86:7523) → /dev/roscar_board (motor board)
 - CP210x (10c4:ea60) → /dev/rplidar (RPLIDAR C1)

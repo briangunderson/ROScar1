@@ -382,7 +382,12 @@ The robot is top-heavy with a short wheelbase and tips over on abrupt stops. The
 - Tune live: `ros2 param set /roscar_driver max_decel_linear 0.5`
 
 ### IMU → EKF Integration
-The EKF uses `imu/data_raw` directly (bypassing Madgwick filter) for angular velocity fusion. The driver sets an identity orientation quaternion (0,0,0,1) on imu/data_raw so robot_localization's frame transform is a no-op. This avoids a subtle bug where negating gyro gz corrects the angular velocity sign but breaks Madgwick's internal orientation quaternion, which robot_localization uses for frame transforms even when orientation fusion is disabled.
+The EKF uses `imu/data_raw` directly (bypassing Madgwick filter) for angular velocity fusion only. The driver uses the ROS `-1` covariance convention to explicitly mark unused IMU data channels:
+- `orientation_covariance[0] = -1` — "no orientation data" (prevents robot_localization from using orientation in any internal code path)
+- `linear_acceleration_covariance[0] = -1` — "no acceleration data"
+- `imu0_remove_gravitational_acceleration: false` in EKF config (eliminates gravity removal code path)
+
+**CRITICAL**: Without the `-1` covariance flags, robot_localization processes orientation/accel through internal code paths (gravity removal, frame transforms) even when fusion is disabled in `imu0_config`. This caused EKF divergence (angular.z exploding to 10M+ rad/s within minutes on a stationary robot).
 
 ## TODO
 - [ ] Measure actual robot dimensions and update URDF (current values are PLACEHOLDERS)
