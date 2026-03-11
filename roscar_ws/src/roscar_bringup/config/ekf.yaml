@@ -27,17 +27,18 @@ ekf_filter_node:
     odom0_differential: false
     odom0_relative: false
 
-    # --- IMU (Madgwick-filtered) ---
-    # Provides heading (yaw) and angular velocity.
-    # differential=true: use yaw *changes* rather than absolute heading,
-    # since Madgwick's initial heading is arbitrary.
-    imu0: "imu/data"
+    # --- IMU (raw, angular velocity only) ---
+    # Use imu/data_raw directly — bypasses Madgwick whose orientation is
+    # broken (negating gz fixes angular_velocity sign but inverts the
+    # Madgwick quaternion).  The driver sets identity orientation on
+    # imu/data_raw so robot_localization's frame transform is a no-op.
+    imu0: "imu/data_raw"
     imu0_config: [false, false, false,   # x, y, z
-                  false, false, true,    # roll, pitch, yaw
+                  false, false, false,   # roll, pitch, yaw
                   false, false, false,   # vx, vy, vz
                   false, false, true,    # vroll, vpitch, vyaw
                   false, false, false]   # ax, ay, az
-    imu0_differential: true
+    imu0_differential: false
     imu0_relative: false
     imu0_remove_gravitational_acceleration: true
 

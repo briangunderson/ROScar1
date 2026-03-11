@@ -36,8 +36,8 @@ def _launch_camera(context):
 def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
-            'video_device', default_value='/dev/video0',
-            description='Video device path for the webcam',
+            'video_device', default_value='/dev/webcam',
+            description='Video device path for the webcam (udev symlink)',
         ),
         DeclareLaunchArgument(
             'image_width', default_value='640',

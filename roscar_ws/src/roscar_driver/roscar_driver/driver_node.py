@@ -57,6 +57,8 @@ class RoscarDriverNode(Node):
         self.declare_parameter('pub_rate', 20.0)       # Hz
         self.declare_parameter('gyro_cal_seconds', 2.0)  # startup calibration
         self.declare_parameter('yaw_trim', 0.0)  # rad/s per m/s forward speed
+        self.declare_parameter('max_decel_linear', 1.0)   # m/s² deceleration limit
+        self.declare_parameter('max_decel_angular', 3.0)   # rad/s² deceleration limit
 
         # -- Read parameters --
         serial_port = self.get_parameter('serial_port').value
@@ -124,7 +126,18 @@ class RoscarDriverNode(Node):
         timer_period = 1.0 / pub_rate
         self._pub_timer = self.create_timer(timer_period, self._publish_sensor_data)
 
-        # -- Watchdog: stop motors if no cmd_vel for 500ms --
+        # -- Velocity smoothing (deceleration limiter) --
+        # Prevents abrupt stops that can tip the top-heavy robot.
+        # cmd_vel_callback sets _target_vel; the ramp timer smoothly
+        # moves _current_vel toward target, limiting deceleration rate.
+        self._target_vel = [0.0, 0.0, 0.0]   # [vx, vy, wz] from cmd_vel
+        self._current_vel = [0.0, 0.0, 0.0]  # [vx, vy, wz] sent to motors
+        self._max_decel_lin = self.get_parameter('max_decel_linear').value
+        self._max_decel_ang = self.get_parameter('max_decel_angular').value
+        self._ramp_dt = 0.02  # 50 Hz ramp timer
+        self._ramp_timer = self.create_timer(self._ramp_dt, self._ramp_velocity)
+
+        # -- Watchdog: set target to zero if no cmd_vel for 500ms --
         self._last_cmd_time = self.get_clock().now()
         self._watchdog_timer = self.create_timer(0.1, self._watchdog_callback)
 
@@ -161,11 +174,10 @@ class RoscarDriverNode(Node):
         return max(-limit, min(limit, value))
 
     def _cmd_vel_callback(self, msg: Twist):
-        """Forward velocity commands to the motor board.
+        """Set target velocity from cmd_vel (actual motor command via ramp timer).
 
         The board is mounted 180-deg rotated (camera/lidar on its "rear") and
-        motor L/R ports are swapped.  Net effect: negate all three components
-        (vx, vy, wz) at the hardware boundary.
+        motor L/R ports are swapped.  Negation is applied in _send_motor_cmd().
         """
         self._last_cmd_time = self.get_clock().now()
 
@@ -179,14 +191,64 @@ class RoscarDriverNode(Node):
         yaw_trim = self.get_parameter('yaw_trim').value
         wz += yaw_trim * vx
 
-        if self._bot is not None:
-            self._bot.set_car_motion(-vx, -vy, -wz)
+        self._target_vel = [vx, vy, wz]
 
     def _watchdog_callback(self):
-        """Stop motors if no cmd_vel received recently."""
+        """Set target to zero if no cmd_vel received recently."""
         elapsed = (self.get_clock().now() - self._last_cmd_time).nanoseconds / 1e9
-        if elapsed > 0.5 and self._bot is not None:
-            self._bot.set_car_motion(0.0, 0.0, 0.0)
+        if elapsed > 0.5:
+            self._target_vel = [0.0, 0.0, 0.0]
+
+    def _ramp_velocity(self):
+        """Smoothly ramp current velocity toward target, limiting deceleration.
+
+        Acceleration is unlimited (instant response feels good); deceleration
+        is rate-limited to prevent the top-heavy robot from tipping over.
+        """
+        dt = self._ramp_dt
+        changed = False
+        for i in range(3):
+            target = self._target_vel[i]
+            current = self._current_vel[i]
+            diff = target - current
+
+            if abs(diff) < 0.005:
+                # Close enough — snap to target (avoid hovering near zero)
+                if self._current_vel[i] != target:
+                    self._current_vel[i] = target
+                    changed = True
+                continue
+
+            # Determine if this step is decelerating (moving toward zero)
+            decelerating = abs(target) < abs(current)
+
+            if decelerating:
+                max_step = (self._max_decel_ang if i == 2
+                            else self._max_decel_lin) * dt
+                step = max(-max_step, min(max_step, diff))
+            else:
+                # Acceleration: unlimited (apply full target immediately)
+                step = diff
+
+            self._current_vel[i] += step
+            changed = True
+
+        if changed or any(v != 0.0 for v in self._current_vel):
+            self._send_motor_cmd()
+
+    def _send_motor_cmd(self):
+        """Send current velocity to motor board.
+
+        Board is mounted 180° rotated AND motor L/R ports are swapped.
+        For linear axes (vx, vy): the 180° rotation reverses them, but the
+        L/R port swap (with H-bridge polarity difference) also reverses them.
+        Two reversals cancel → send vx, vy unchanged.
+        For angular axis (wz): 180° rotation does NOT affect Z-rotation, but
+        the L/R port swap reverses rotation direction → negate wz only.
+        """
+        if self._bot is not None:
+            vx, vy, wz = self._current_vel
+            self._bot.set_car_motion(vx, vy, wz)
 
     def _publish_sensor_data(self):
         """Read sensors from the board and publish ROS2 topics."""
@@ -198,11 +260,10 @@ class RoscarDriverNode(Node):
         time_sec = now.nanoseconds / 1e9
 
         # --- Velocity / Odometry ---
-        # Board axes are rotated from robot frame and motor ports are
-        # swapped left/right: negate all velocity components
+        # Motor wiring matches board port labels. STM32 FK produces correct
+        # velocities directly — no sign corrections needed.
         try:
             vx, vy, vz = self._bot.get_motion_data()
-            vx, vy, vz = -vx, -vy, -vz
         except Exception:
             vx, vy, vz = 0.0, 0.0, 0.0
 
@@ -261,8 +322,10 @@ class RoscarDriverNode(Node):
         # Board axes are 180-deg rotated in yaw: negate x, y for both.
         # Accel z: Rosmaster_Lib reports gravity as negative; ROS expects
         # +9.81 when flat, so negate az too.
-        # Gyro z: 180-deg yaw rotation does NOT change gz direction, so
-        # keep gz as-is (it must agree with wheel encoder angular velocity).
+        # Gyro z: In theory, 180° yaw rotation shouldn't change gz sign.
+        # In practice, the board firmware reports gz with inverted sign
+        # (empirically confirmed: left turn gives negative gz). Negate
+        # all three gyro axes so gz agrees with wheel encoder angular vel.
         try:
             ax, ay, az = self._bot.get_accelerometer_data()
             gx, gy, gz = self._bot.get_gyroscope_data()
@@ -270,9 +333,9 @@ class RoscarDriverNode(Node):
             gx -= self._gyro_bias[0]
             gy -= self._gyro_bias[1]
             gz -= self._gyro_bias[2]
-            # Board 180° rotation correction
+            # Board 180° rotation + firmware sign correction
             ax, ay, az = -ax, -ay, -az
-            gx, gy = -gx, -gy
+            gx, gy, gz = -gx, -gy, -gz
         except Exception:
             ax, ay, az = 0.0, 0.0, 0.0
             gx, gy, gz = 0.0, 0.0, 0.0
@@ -280,8 +343,12 @@ class RoscarDriverNode(Node):
         imu_msg = Imu()
         imu_msg.header.stamp = stamp
         imu_msg.header.frame_id = self._imu_frame
-        # Orientation not provided by raw data (use IMU filter downstream)
-        imu_msg.orientation_covariance[0] = -1.0  # indicates no orientation
+        # Set identity orientation so robot_localization can use this IMU
+        # directly for angular velocity without Madgwick.  robot_localization
+        # uses the orientation quaternion to transform angular_velocity from
+        # sensor frame to body frame even when orientation fusion is disabled;
+        # identity tells it "sensor frame == body frame" (no rotation needed).
+        imu_msg.orientation.w = 1.0  # identity quaternion (x=y=z=0, w=1)
         imu_msg.angular_velocity.x = float(gx)
         imu_msg.angular_velocity.y = float(gy)
         imu_msg.angular_velocity.z = float(gz)
@@ -325,6 +392,8 @@ class RoscarDriverNode(Node):
     def destroy_node(self):
         """Clean shutdown: stop motors before exiting."""
         self.get_logger().info('Shutting down, stopping motors...')
+        self._current_vel = [0.0, 0.0, 0.0]
+        self._target_vel = [0.0, 0.0, 0.0]
         if self._bot is not None:
             self._bot.set_car_motion(0.0, 0.0, 0.0)
             self._bot.reset_car_state()

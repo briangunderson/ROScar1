@@ -18,3 +18,8 @@ SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="r
 
 # RPLIDAR C1 - Silicon Labs CP210x USB-to-UART
 SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", SYMLINK+="rplidar", MODE="0666"
+
+# Logitech webcam (046d:0825) - stable symlink at /dev/webcam
+# RPi5's internal ISP uses /dev/video0-37, so the webcam gets a high number.
+# This rule creates /dev/webcam so the video device path is predictable.
+SUBSYSTEM=="video4linux", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="0825", ATTR{index}=="0", SYMLINK+="webcam", MODE="0666"

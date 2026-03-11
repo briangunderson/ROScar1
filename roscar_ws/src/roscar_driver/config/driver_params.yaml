@@ -22,5 +22,12 @@ roscar_driver:
     # Tune live: ros2 param set /roscar_driver yaw_trim <value>
     yaw_trim: 0.0
 
+    # Deceleration limits — prevents abrupt stops that tip the robot.
+    # Robot is top-heavy with short wheelbase; needs gentle slowdowns.
+    # Acceleration is unlimited (instant response).
+    # Tune live: ros2 param set /roscar_driver max_decel_linear <value>
+    max_decel_linear: 1.0    # m/s² — linear deceleration limit
+    max_decel_angular: 3.0   # rad/s² — angular deceleration limit
+
     # Publish rate for sensor data (Hz)
     pub_rate: 20.0

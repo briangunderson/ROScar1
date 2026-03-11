@@ -23,14 +23,18 @@
 - teleop_twist_keyboard needs its own terminal with stdin — can't capture keys when launched inside a launch file. Run robot bringup and teleop in separate terminals.
 
 ## Hardware Orientation
-- Board's X-axis (forward) points opposite to the physical front (where camera/lidar are)
-- Motor L/R ports are also swapped relative to the board's expectations
-- Commands: `set_car_motion(-vx, -vy, -wz)` — negate all three at hardware boundary
-- Wheel odom: negate vx, vy ONLY; keep vz (Z-axis angular velocity is unchanged by 180° yaw rotation)
+- Board is mounted 180° rotated on the chassis
+- **Motor wiring physically corrected** (2025-03-11): All 4 motor connectors rewired so ports match physical positions with correct polarity:
+  - M1=FL forward, M2=RL forward, M3=FR forward, M4=RR forward (all for +PWM)
+  - Required: reversing polarity on all 4 motor connectors + swapping M2↔M4 cables on the board
+- **Motor commands**: `set_car_motion(vx, vy, wz)` — NO sign corrections needed
+- **Wheel odom readback**: use raw values from `get_motion_data()` — NO negation needed
+- **LESSON**: Left and right H-bridges on YB-ERF01-V3.0 have DIFFERENT polarity conventions. Moving a cable from one side to the other flips its direction.
+- **LESSON**: Theoretical analysis of 180° rotation + L/R swap effects is error-prone. Always verify empirically with individual `set_motor()` tests on each port.
+- **LESSON**: When troubleshooting motor direction, test individual motors with raw PWM (`set_motor`) to map physical wiring before attempting software corrections.
 - IMU accelerometer: negate ALL three axes (ax, ay, az) — 180-deg yaw flips x,y; Rosmaster_Lib reports gravity as -Z but ROS expects +9.81 when flat, so negate az too
 - IMU gyroscope: negate ALL three axes (gx, gy, gz) — board firmware reports gz with inverted sign (empirically confirmed: left turn gives negative gz from board)
 - Magnetometer: negate mx, my; keep mz
-- **LESSON**: The original code negated wheel odom vz — this broke yaw tracking. Z-axis rotation direction is NOT changed by a 180° yaw rotation, so vz should NOT be negated.
 - **LESSON**: Negating gyro gz gives correct angular_velocity sign but BREAKS Madgwick filter. Madgwick uses gz internally for orientation tracking — negating it makes the orientation quaternion rotate the wrong way. Solution: bypass Madgwick entirely and use imu/data_raw for the EKF.
 
 ## robot_localization (EKF) IMU Gotcha
@@ -49,6 +53,9 @@
 - Publishes /image_raw at 30fps and /camera_info
 - No calibration file yet — camera_calibration_parsers warns but runs fine
 - YUYV→RGB8 conversion is "possibly slow" per v4l2_camera — consider MJPG output_encoding for better performance
+- RPi5 ISP occupies /dev/video0-37 — USB webcams get high numbers. Use udev symlink `/dev/webcam`
+- **web_video_server does NOT URL-decode query parameter values** — `encodeURIComponent('/image_raw')` → `%2Fimage_raw` which doesn't match any topic. Server sends HTTP 200 + multipart headers but closes with no frames. Browser `<img>` tag fails silently (no onload, no onerror), showing black rectangle.
+- **Rule**: Never `encodeURIComponent()` ROS topic names in web_video_server URLs. ROS topic chars (`/`, `_`, alphanumeric) are all valid in URL query parameters without encoding.
 
 ## Sensor Fusion (EKF + Madgwick)
 - imu_filter_madgwick: `fixed_frame` must be `odom`, NOT `base_link` — Madgwick needs a non-rotating reference
@@ -56,6 +63,8 @@
 - EKF: don't fuse both position AND velocity from wheel odom — position is just integrated velocity, so they're not independent. Use velocity only from odom, let EKF integrate.
 - EKF frequency 20Hz is sufficient for RPi5; 30Hz causes "failed to meet update rate" startup errors
 - When debugging, watch out for STALE PROCESSES from previous launches. Multiple driver nodes publishing on the same topic causes confusing data. Always `kill -9` by PID before relaunching.
+- **CRITICAL: Duplicate EKF nodes cause state explosion**. Two EKF nodes reading the same sensor topics and publishing to `/odometry/filtered` creates a feedback/divergence spiral. Observed: angular.z reaching 55 MILLION rad/s despite sane inputs. Root cause in one case: two `ros2 launch` commands ran in backgrounded SSH sessions, each spawning their own EKF + driver + IMU nodes. The launch processes died but child nodes survived as orphans. Fix: kill ALL orphaned ROS nodes (`ps aux | grep` each node type), then start a single clean launch.
+- **LESSON**: When launching ROS2 via SSH background (`nohup ... &`), killing the launch process does NOT kill child nodes — they become orphans. Always check for orphaned processes before relaunching: `ps aux | grep -E 'ekf|driver|imu|sllidar|v4l2|joint_state'`
 - The `pgrep` command is not installed by default on Ubuntu 24.04 Server — use `killall` or `ps aux | grep` + `kill` instead
 
 ## SLAM (slam_toolbox)
@@ -95,6 +104,13 @@
 - This prevents ALL other functionality (e.g., /cmd_vel never gets established)
 - **Rule**: defer ActionClient creation to when it's actually needed (e.g., user enters nav goal mode), not on connection
 - TODO: investigate newer roslibjs versions that support ROS2 actions natively, or use ROSLIB.Service for /navigate_to_pose
+
+## Python __pycache__ Gotcha (CRITICAL)
+- After SCP'ing updated `.py` files, Python may still load the OLD code from `__pycache__/*.pyc` if the `.pyc` has a newer timestamp than the `.py`
+- `colcon build --symlink-install` doesn't clear `__pycache__` — stale bytecache persists across builds
+- **Fix**: Always clear `__pycache__` after deploying changed Python files: `find ~/roscar_ws -path "*/__pycache__" -name "*.pyc" -delete`
+- Or `touch` the `.py` file to ensure its timestamp is newer than any `.pyc`
+- **Rule**: After SCP + colcon build, delete `__pycache__` for any package with changed Python files before restarting nodes
 
 ## Deployment: Git Repo vs Workspace on Pi
 - Git repo lives at `~/ROScar1/` on the Pi
@@ -153,14 +169,36 @@
 - Default `xy_goal_tolerance: 0.25` means the robot is "at the goal" when within 25cm — may need tightening for precision
 - Goal at (0.30, 0.00) with map extent [−1.65, 0.25] causes "Goal Coordinates outside bounds" — the goal must be within the SLAM map
 
-## Nav2 Collision Monitor (CRITICAL)
-- Nav2 velocity pipeline: controller → `/cmd_vel_nav` → velocity_smoother → `/cmd_vel_smoothed` → collision_monitor → `/cmd_vel`
+## Nav2 Collision Monitor + cmd_vel Pipeline (CRITICAL)
+- Nav2 Jazzy velocity pipeline: controller → `/cmd_vel` → velocity_smoother → `/cmd_vel_smoothed` → collision_monitor → `/cmd_vel`
+- This IS a feedback loop by design — velocity_smoother subscribes to `/cmd_vel` (from controller) and collision_monitor publishes back to `/cmd_vel`
 - The collision_monitor sits LAST in the pipeline and can silently zero ALL velocity commands
-- A PolygonStop zone matching the robot footprint exactly (0.15m from center) with `min_points: 4` triggers on nearby wall returns
-- **Symptom**: controller publishes good velocities, smoother passes them through, but `/cmd_vel` is ALL zeros — robot won't move
-- The laser_filter drops returns < 0.15m, but returns at 0.15-0.20m still fall inside a tight polygon
-- **Fix**: Expand PolygonStop beyond footprint (0.20m) with high `min_points: 8`, add PolygonSlow (0.30m) for gradual deceleration
-- **Debugging tip**: `ros2 topic echo /cmd_vel_nav` vs `/cmd_vel` — if nav has velocities but cmd_vel is zero, collision_monitor is the culprit
+- **cmd_vel conflict**: When Nav2 + teleop both run (slam_nav mode), the controller, velocity_smoother (via collision_monitor), AND teleop all publish to `/cmd_vel`. The driver gets a mix of messages.
+- **Symptom**: When Nav2 goal fails → recovery behaviors (spin, backup, wait) run continuously, overriding teleop commands. Drive page "stops working" because recovery commands override joystick.
+- **Root cause of "Start occupied"**: costmap inflation_radius was too aggressive (0.15m) + PLACEHOLDER footprint (0.25×0.28m) = effective zone ~0.55×0.58m. Any wall within ~28cm of robot → planner thinks start is inside obstacle.
+- **Fix**: Reduced inflation_radius to 0.08m, cost_scaling_factor to 3.0. Effective zone now ~0.41×0.44m.
+- PolygonStop disabled (robot operates in tight spaces, costmap handles avoidance via planner)
+- **Debugging tip**: `ros2 topic echo /cmd_vel_smoothed` vs `/cmd_vel` — if smoothed has velocities but cmd_vel is zero, collision_monitor is the culprit
+- **Future**: Add `twist_mux` for proper teleop/Nav2 coexistence with priority-based cmd_vel arbitration
+
+## Nav2 Cancel Goal (Web Dashboard)
+- roslibjs ActionClient.sendGoal() returns a goalHandle with .cancel() method
+- The cancel button must remain visible while a goal is ACTIVE (goalHandle !== null), not just while in goal-picking mode (navGoalMode)
+- Separating navGoalMode (clicking map to pick target) from goalHandle (goal is running) prevents losing the cancel button after sending a goal
+
+## rosapi Node (CRITICAL for Web Dashboard)
+- roslibjs's `ros.getNodes()` requires the `rosapi` node to be running — it calls the `/rosapi/nodes` service
+- Without rosapi, the STATUS tab's node list shows nothing (silent failure)
+- **Fix**: Add rosapi_node to web.launch.py alongside rosbridge_server
+- rosapi is part of `rosbridge_suite` but is a SEPARATE node that must be explicitly launched
+
+## Motor Diagnostics
+- A dead encoder on one mecanum wheel is nearly invisible during manual teleop (human compensates) but completely breaks Nav2 autonomous navigation
+- The STM32 PID loop uses encoder feedback — dead encoder means PID saturates output (motor runs uncontrolled) and `get_motion_data()` returns wrong velocities
+- Two compounding failures: (1) wheel odom is systematically wrong → EKF position drifts, (2) actual robot motion doesn't match commanded velocities → controller can't follow paths
+- `scripts/motor_test.py` tests all 4 motors independently: commands forward/strafe/rotate and reads encoder deltas per motor
+- Motor mapping: M1=front-left, M2=rear-left, M3=front-right, M4=rear-right
+- To isolate motor vs board vs wiring: swap wires between ports and re-test. If the dead reading follows the motor, it's the motor/encoder. If it stays on the same port, it's the board.
 
 ## udev
 - CH340 (1a86:7523) → /dev/roscar_board (motor board)

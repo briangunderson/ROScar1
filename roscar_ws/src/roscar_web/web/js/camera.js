@@ -24,23 +24,45 @@ export function initCamera() {
 // ── Build stream URL ───────────────────────────────────────────────────────
 function streamUrl() {
   const [w, h] = resolution.split('x');
+  // Don't encodeURIComponent the topic — web_video_server doesn't decode %2F,
+  // so it can't find the topic. ROS topic chars (/ _ alnum) are URL-safe.
   return `http://${HOST}:${PORTS.video}/stream?` +
-    `topic=${encodeURIComponent(TOPIC)}&quality=${quality}&width=${w}&height=${h}&type=mjpeg`;
+    `topic=${TOPIC}&quality=${quality}&width=${w}&height=${h}&type=mjpeg`;
 }
 
 // ── Start / Stop ───────────────────────────────────────────────────────────
+let streamTimeout = null;
+
 function startStream() {
   const img     = document.getElementById('camera-img');
   const overlay = document.getElementById('camera-overlay');
 
-  img.onload = () => { overlay.style.display = 'none'; streaming = true; };
-  img.onerror = () => { overlay.style.display = ''; streaming = false; };
+  clearTimeout(streamTimeout);
+
+  img.onload = () => {
+    clearTimeout(streamTimeout);
+    overlay.style.display = 'none';
+    streaming = true;
+  };
+  img.onerror = () => {
+    clearTimeout(streamTimeout);
+    overlay.style.display = '';
+    streaming = false;
+  };
 
   img.src = streamUrl();
   overlay.style.display = 'none'; // optimistic hide
+
+  // If no frame arrives within 5s, show offline overlay
+  streamTimeout = setTimeout(() => {
+    if (!streaming) {
+      overlay.style.display = '';
+    }
+  }, 5000);
 }
 
 function stopStream() {
+  clearTimeout(streamTimeout);
   const img = document.getElementById('camera-img');
   img.src = '';
   document.getElementById('camera-overlay').style.display = '';
