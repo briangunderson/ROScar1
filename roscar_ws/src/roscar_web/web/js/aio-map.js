@@ -44,19 +44,27 @@ function subscribeMap() {
   if (mapSub) { try { mapSub.unsubscribe(); } catch (_) {} }
   mapSub = new ROSLIB.Topic({
     ros, name: '/map', messageType: 'nav_msgs/OccupancyGrid',
-    throttle_rate: 2000,
+    throttle_rate: 1000,
   });
-  let firstMap = true;
+  let prevW = 0, prevH = 0;
+  let prevOriginX = null, prevOriginY = null;
   mapSub.subscribe((msg) => {
+    const w = msg.info.width, h = msg.info.height;
+    const ox = msg.info.origin.position.x, oy = msg.info.origin.position.y;
+    // Copy the data array so we always hold a fresh snapshot
     mapData = {
-      width: msg.info.width, height: msg.info.height,
+      width: w, height: h,
       resolution: msg.info.resolution,
       origin: msg.info.origin.position,
-      data: msg.data,
+      data: Array.from(msg.data),
     };
-    setEl('map-size-disp', `${msg.info.width}\u00d7${msg.info.height}`);
+    setEl('map-size-disp', `${w}\u00d7${h}`);
     setEl('map-res-disp',  `${(msg.info.resolution * 100).toFixed(0)}cm`);
-    if (firstMap) { fitMapToCanvas(); firstMap = false; }
+    // Re-fit view when map dimensions or origin change (grid expanded by SLAM)
+    if (w !== prevW || h !== prevH || ox !== prevOriginX || oy !== prevOriginY) {
+      fitMapToCanvas();
+      prevW = w; prevH = h; prevOriginX = ox; prevOriginY = oy;
+    }
     needsDraw = true;
   });
 }
