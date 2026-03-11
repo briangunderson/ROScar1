@@ -41,6 +41,14 @@ export function initMap(getRosFn) {
 
 export function enableNavGoalMode() { setNavGoalMode(true); }
 
+/** Clear local map data so the canvas shows the "NO MAP DATA" placeholder. */
+export function clearMap() {
+  mapData = null;
+  robotPos = null;
+  hasTFPose = false;
+  needsDraw = true;
+}
+
 // ── Subscriptions ───────────────────────────────────────────────────────────
 function subscribeMap() {
   const ros = getRos(); if (!ros) return;

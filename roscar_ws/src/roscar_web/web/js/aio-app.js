@@ -8,7 +8,7 @@ import { initTeleop }      from './aio-teleop.js';
 import { initCamera }      from './aio-camera.js';
 import { initStatus, onNavModeChange } from './aio-status.js';
 import { initLidar }       from './aio-lidar.js';
-import { initMap, enableNavGoalMode }  from './aio-map.js';
+import { initMap, enableNavGoalMode, clearMap }  from './aio-map.js';
 import { initGraphs }       from './aio-graphs.js';
 import { initDiagnostics }  from './aio-diagnostics.js';
 import { initTF }           from './aio-tf.js';
