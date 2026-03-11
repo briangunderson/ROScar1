@@ -2,6 +2,7 @@
 
 import cv2
 import numpy as np
+from scipy.spatial.transform import Rotation as R
 
 import rclpy
 from rclpy.node import Node
@@ -153,21 +154,14 @@ class ArucoDetectorNode(Node):
         t.transform.translation.y = float(tvec[1])
         t.transform.translation.z = float(tvec[2])
 
-        # Convert rotation vector to quaternion
+        # Convert rotation vector to quaternion via scipy (robust for all angles)
         rot_mat, _ = cv2.Rodrigues(rvec)
-        # Rotation matrix → quaternion (wxyz)
-        qw = np.sqrt(1 + rot_mat[0, 0] + rot_mat[1, 1] + rot_mat[2, 2]) / 2
-        if qw > 1e-6:
-            qx = (rot_mat[2, 1] - rot_mat[1, 2]) / (4 * qw)
-            qy = (rot_mat[0, 2] - rot_mat[2, 0]) / (4 * qw)
-            qz = (rot_mat[1, 0] - rot_mat[0, 1]) / (4 * qw)
-        else:
-            qw, qx, qy, qz = 1.0, 0.0, 0.0, 0.0
+        quat = R.from_matrix(rot_mat).as_quat()  # returns [x, y, z, w]
 
-        t.transform.rotation.x = float(qx)
-        t.transform.rotation.y = float(qy)
-        t.transform.rotation.z = float(qz)
-        t.transform.rotation.w = float(qw)
+        t.transform.rotation.x = float(quat[0])
+        t.transform.rotation.y = float(quat[1])
+        t.transform.rotation.z = float(quat[2])
+        t.transform.rotation.w = float(quat[3])
 
         self.tf_broadcaster.sendTransform(t)
 
