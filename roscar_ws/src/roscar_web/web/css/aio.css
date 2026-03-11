@@ -456,10 +456,16 @@ input[type=range]::-moz-range-thumb {
   flex-shrink: 0;
 }
 .tf-tree {
-  flex: 1; overflow: auto;
+  flex: 1; overflow: hidden;
   font-size: 9px; color: var(--text-dim);
   padding: 2px 4px;
   line-height: 1.5;
+  position: relative;
+}
+.tf-tree-inner {
+  transform-origin: top left;
+  display: inline-block;
+  white-space: nowrap;
 }
 .tf-row {
   display: flex; align-items: flex-start;
