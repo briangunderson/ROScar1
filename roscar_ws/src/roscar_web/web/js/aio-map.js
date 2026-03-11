@@ -1,6 +1,7 @@
 /**
  * aio-map.js — OccupancyGrid renderer + robot pose overlay + click-to-navigate.
- * Always active (no tab gating). Subscribes to /map and /odometry/filtered.
+ * Always active (no tab gating). Subscribes to /map for the grid, uses TFClient
+ * (map→odom→base_footprint) for SLAM-corrected pose, falls back to /odometry/filtered.
  * Supports pan (drag), zoom (buttons + scroll), Nav2 goal via action client.
  */
 
@@ -9,6 +10,8 @@ import { onAppEvent, toast } from './aio-app.js';
 let getRos;
 let mapSub   = null;
 let poseSub  = null;
+let tfClient = null;
+let hasTFPose = false;  // true when TFClient is providing map-frame poses
 let mapData  = null;    // {width, height, resolution, origin, data[]}
 let robotPos = null;    // {x, y, yaw}
 
@@ -31,7 +34,7 @@ export function initMap(getRosFn) {
   setupControls();
   setupResizeObserver();
   onAppEvent((ev) => {
-    if (ev === 'connected') { subscribeMap(); subscribePose(); }
+    if (ev === 'connected') { subscribeMap(); subscribePose(); subscribeTF(); }
   });
   startRAFLoop();
 }
@@ -77,10 +80,34 @@ function subscribePose() {
     throttle_rate: 200,
   });
   poseSub.subscribe((msg) => {
+    // Only use odom as fallback when TFClient isn't providing map-frame poses
+    if (hasTFPose) return;
     const q = msg.pose.pose.orientation;
     const p = msg.pose.pose.position;
     robotPos = {
       x: p.x, y: p.y,
+      yaw: Math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z)),
+    };
+    needsDraw = true;
+  });
+}
+
+function subscribeTF() {
+  const ros = getRos(); if (!ros) return;
+  if (tfClient) { try { tfClient.dispose(); } catch (_) {} }
+  tfClient = new ROSLIB.TFClient({
+    ros,
+    fixedFrame: 'map',
+    angularThres: 0.01,
+    transThres: 0.01,
+    rate: 10.0,
+  });
+  tfClient.subscribe('base_footprint', (tf) => {
+    hasTFPose = true;
+    const q = tf.rotation;
+    robotPos = {
+      x: tf.translation.x,
+      y: tf.translation.y,
       yaw: Math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z)),
     };
     needsDraw = true;
