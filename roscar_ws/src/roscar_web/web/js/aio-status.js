@@ -170,6 +170,27 @@ function setupServices() {
   saveMapSvc = new ROSLIB.Service({
     ros, name: '/web/save_map', serviceType: 'roscar_interfaces/SaveMap',
   });
+
+  // Fetch current mode from launch_manager so UI reflects reality after refresh
+  const getStatusSvc = new ROSLIB.Service({
+    ros, name: '/web/get_status', serviceType: 'roscar_interfaces/GetStatus',
+  });
+  getStatusSvc.callService(new ROSLIB.ServiceRequest({}), (resp) => {
+    if (resp.mode) {
+      currentMode = resp.mode;
+      setEl('mode-display', resp.mode.toUpperCase());
+      // Update mode button active state
+      document.querySelectorAll('#panel-status .mode-btn-sm[data-mode]').forEach(b => {
+        b.classList.toggle('active', b.dataset.mode === currentMode);
+      });
+      // Enable nav goal clicking if already in a nav mode
+      if ((currentMode === 'navigation' || currentMode === 'slam_nav') && navGoalCallback) {
+        navGoalCallback(true);
+      }
+    }
+  }, (err) => {
+    console.warn('Could not fetch current mode:', err);
+  });
 }
 
 // ── Mode Buttons ────────────────────────────────────────────────────────────
