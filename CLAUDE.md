@@ -237,19 +237,48 @@ http://<robot-ip>:8888/
 ### Web Frontend Files
 ```
 roscar_ws/src/roscar_web/web/
-├── index.html          # Single-page app
-├── css/style.css       # Industrial mission-control theme
+├── index.html          # Tabbed single-page app (original)
+├── aio.html            # All-in-one mission control dashboard
+├── css/
+│   ├── style.css       # Original tabbed theme
+│   └── aio.css         # AIO dashboard standalone CSS
 └── js/
     ├── lib/roslib.min.js      # vendored roslibjs
     ├── lib/nipplejs.min.js    # vendored nipplejs joystick
-    ├── app.js          # Entry: ROS connection, tabs, E-STOP
-    ├── teleop.js       # Joystick + keyboard -> /cmd_vel
-    ├── camera.js       # MJPEG stream from web_video_server
-    ├── status.js       # Subscribe odometry/IMU/battery
-    ├── lidar.js        # /scan mini radar on drive tab
-    ├── map.js          # OccupancyGrid canvas + nav goals
-    └── modes.js        # Mode switching + map save services
+    ├── app.js          # Original: ROS connection, tabs, E-STOP
+    ├── teleop.js       # Original: Joystick + keyboard -> /cmd_vel
+    ├── camera.js       # Original: MJPEG stream
+    ├── status.js       # Original: odometry/IMU/battery
+    ├── lidar.js        # Original: /scan mini radar
+    ├── map.js          # Original: OccupancyGrid + nav goals
+    ├── modes.js        # Original: Mode switching + map save
+    ├── aio-app.js      # AIO entry: ROS connection, E-STOP, module init
+    ├── aio-teleop.js   # AIO: dual joystick + WASD + gamepad
+    ├── aio-camera.js   # AIO: MJPEG always-on stream
+    ├── aio-status.js   # AIO: status + mode switching combined
+    ├── aio-lidar.js    # AIO: lidar mini-radar
+    ├── aio-map.js      # AIO: OccupancyGrid + nav goals
+    ├── aio-graphs.js   # AIO: rolling sparkline charts (vx/vy/wz/battery)
+    ├── aio-diagnostics.js  # AIO: /rosout log viewer
+    └── aio-tf.js       # AIO: TF tree visualizer
 ```
+
+### AIO Dashboard (aio.html)
+All-in-one mission control page showing everything simultaneously (no tab switching).
+Access at `http://<robot-ip>:8888/aio.html` — coexists with original tabbed UI at `/`.
+
+**Layout**: CSS Grid, 3 columns x 2 rows:
+| Camera + Lidar | Map (1.5x wide) | Status + Modes |
+|----------------|------------------|----------------|
+| Drive (joysticks) | Graphs (sparklines) | Diagnostics |
+
+**Features beyond original UI**:
+- **Gamepad support**: Browser Gamepad API, standard mapping, 0.15 deadzone, priority over joystick/keyboard
+- **Sparkline graphs**: Rolling 60s canvas charts for vx, vy, wz, battery with hover tooltips
+- **Diagnostics log viewer**: `/rosout` subscriber, severity filtering (ALL/INFO/WARN/ERR), 500-entry FIFO, auto-scroll
+- **TF tree visualizer**: `/tf` + `/tf_static` subscribers, HTML tree with staleness detection
+
+**Module architecture**: Each `aio-*.js` is an ES module. `aio-app.js` is the entry point that creates the ROS connection, E-STOP handler, and initializes all modules. Data sharing uses callbacks (`onOdomData`, `onBatteryData`) to avoid duplicate subscriptions.
 
 ### Install Dependencies (in addition to SLAM deps)
 ```bash
