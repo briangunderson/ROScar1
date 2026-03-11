@@ -343,12 +343,14 @@ class RoscarDriverNode(Node):
         imu_msg = Imu()
         imu_msg.header.stamp = stamp
         imu_msg.header.frame_id = self._imu_frame
-        # Set identity orientation so robot_localization can use this IMU
-        # directly for angular velocity without Madgwick.  robot_localization
-        # uses the orientation quaternion to transform angular_velocity from
-        # sensor frame to body frame even when orientation fusion is disabled;
-        # identity tells it "sensor frame == body frame" (no rotation needed).
-        imu_msg.orientation.w = 1.0  # identity quaternion (x=y=z=0, w=1)
+        # We only fuse angular velocity through robot_localization.
+        # orientation_covariance[0] = -1  tells robot_localization to skip
+        # ALL orientation processing (ROS convention: "no orientation data").
+        # linear_acceleration_covariance[0] = -1  tells it to skip accel too.
+        # This prevents internal code paths (gravity removal, frame transforms)
+        # from using the synthetic identity orientation and causing EKF divergence.
+        imu_msg.orientation.w = 1.0  # identity quaternion (required by msg)
+        imu_msg.orientation_covariance[0] = -1.0  # "no orientation data"
         imu_msg.angular_velocity.x = float(gx)
         imu_msg.angular_velocity.y = float(gy)
         imu_msg.angular_velocity.z = float(gz)
@@ -358,9 +360,7 @@ class RoscarDriverNode(Node):
         imu_msg.linear_acceleration.x = float(ax)
         imu_msg.linear_acceleration.y = float(ay)
         imu_msg.linear_acceleration.z = float(az)
-        imu_msg.linear_acceleration_covariance[0] = 0.04
-        imu_msg.linear_acceleration_covariance[4] = 0.04
-        imu_msg.linear_acceleration_covariance[8] = 0.04
+        imu_msg.linear_acceleration_covariance[0] = -1.0  # "no accel data"
         self._pub_imu.publish(imu_msg)
 
         # --- Magnetometer ---
