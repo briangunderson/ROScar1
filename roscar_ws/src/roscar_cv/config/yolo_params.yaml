@@ -1,0 +1,8 @@
+yolo_detector:
+  ros__parameters:
+    model: "yolov8n.pt"
+    confidence_threshold: 0.5
+    device: "0"
+    detection_rate: 15.0
+    classes: []
+    annotate_image: true
