@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>ROScar1 AIO</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/aio.css">
+</head>
+<body>
+
+  <!-- ═══════════════════ HEADER ═══════════════════ -->
+  <header id="app-header">
+    <div class="header-left">
+      <div class="logo">
+        <span class="logo-bracket">[</span>ROScar1<span class="logo-bracket">]</span>
+        <span class="logo-tag">AIO</span>
+      </div>
+      <div id="conn-indicator" class="conn-indicator disconnected">
+        <span class="conn-dot"></span>
+        <span class="conn-label">DISCONNECTED</span>
+      </div>
+    </div>
+    <div class="header-center">
+      <div class="mode-badge">
+        <span class="mode-label">MODE</span>
+        <span id="mode-display" class="mode-value">IDLE</span>
+      </div>
+    </div>
+    <div class="header-right">
+      <div id="gamepad-indicator" class="gamepad-indicator hidden">
+        <span class="gamepad-icon">&#x1F3AE;</span>
+        <span class="gamepad-label">GAMEPAD</span>
+      </div>
+      <div class="battery-display">
+        <span class="battery-label">BATT</span>
+        <div class="battery-bar-wrap">
+          <div id="battery-bar" class="battery-bar" style="width:0%"></div>
+        </div>
+        <span id="battery-voltage" class="battery-voltage mono">--.-V</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ═══════════════════ AIO GRID ═══════════════════ -->
+  <div id="aio-grid">
+
+    <!-- ── CAMERA PANEL ─────────────────────────────── -->
+    <div class="panel" id="panel-camera" style="grid-area:camera">
+      <div class="panel-title">CAMERA</div>
+      <div class="panel-body">
+        <div class="camera-frame">
+          <img id="camera-img" alt="Camera feed offline" draggable="false">
+          <div id="camera-overlay" class="camera-overlay">
+            <span>CAMERA OFFLINE</span>
+          </div>
+        </div>
+        <div class="camera-ctrls">
+          <div class="ctrl-group">
+            <span class="ctrl-label">Q</span>
+            <button class="sm-btn active" data-quality="20">L</button>
+            <button class="sm-btn" data-quality="50">M</button>
+            <button class="sm-btn" data-quality="80">H</button>
+          </div>
+          <div class="ctrl-group">
+            <span class="ctrl-label">RES</span>
+            <button class="sm-btn active" data-res="320x240">320</button>
+            <button class="sm-btn" data-res="640x480">640</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── MAP PANEL ────────────────────────────────── -->
+    <div class="panel" id="panel-map" style="grid-area:map">
+      <div class="panel-title">
+        MAP
+        <span class="panel-title-info">
+          <span id="map-size-disp" class="mono">--x--</span>
+          <span id="map-res-disp" class="mono">--cm</span>
+        </span>
+        <span class="panel-title-actions">
+          <button class="sm-btn" id="map-zoom-in" title="Zoom In">+</button>
+          <button class="sm-btn" id="map-zoom-out" title="Zoom Out">-</button>
+          <button class="sm-btn" id="map-reset" title="Reset View">R</button>
+        </span>
+      </div>
+      <div class="panel-body panel-body-map">
+        <canvas id="map-canvas"></canvas>
+        <div id="nav-goal-hint" class="nav-hint hidden">TAP MAP TO SET GOAL</div>
+        <button id="cancel-goal-btn" class="sm-btn danger hidden">CANCEL GOAL</button>
+      </div>
+    </div>
+
+    <!-- ── STATUS PANEL ─────────────────────────────── -->
+    <div class="panel" id="panel-status" style="grid-area:status">
+      <div class="panel-title">STATUS</div>
+      <div class="panel-body panel-body-scroll">
+
+        <div class="stat-group">
+          <div class="stat-group-title">POSITION</div>
+          <div class="stat-row">
+            <div class="stat-item"><span class="stat-label">X</span><span id="st-x" class="mono stat-val">+0.000</span><span class="stat-unit">m</span></div>
+            <div class="stat-item"><span class="stat-label">Y</span><span id="st-y" class="mono stat-val">+0.000</span><span class="stat-unit">m</span></div>
+            <div class="stat-item"><span class="stat-label">&theta;</span><span id="st-yaw" class="mono stat-val">+0.00</span><span class="stat-unit">&deg;</span></div>
+          </div>
+        </div>
+
+        <div class="stat-group">
+          <div class="stat-group-title">VELOCITY</div>
+          <div class="stat-row">
+            <div class="stat-item"><span class="stat-label">VX</span><span id="st-vx" class="mono stat-val">+0.000</span><span class="stat-unit">m/s</span></div>
+            <div class="stat-item"><span class="stat-label">VY</span><span id="st-vy" class="mono stat-val">+0.000</span><span class="stat-unit">m/s</span></div>
+            <div class="stat-item"><span class="stat-label">WZ</span><span id="st-wz" class="mono stat-val">+0.000</span><span class="stat-unit">r/s</span></div>
+          </div>
+        </div>
+
+        <div class="stat-group">
+          <div class="stat-group-title">ORIENTATION</div>
+          <div class="stat-row">
+            <div class="stat-item"><span class="stat-label">R</span><span id="st-roll" class="mono stat-val">+0.0</span><span class="stat-unit">&deg;</span></div>
+            <div class="stat-item"><span class="stat-label">P</span><span id="st-pitch" class="mono stat-val">+0.0</span><span class="stat-unit">&deg;</span></div>
+            <div class="stat-item"><span class="stat-label">Y</span><span id="st-imu-yaw" class="mono stat-val">+0.0</span><span class="stat-unit">&deg;</span></div>
+          </div>
+        </div>
+
+        <div class="stat-group">
+          <div class="stat-group-title">BATTERY</div>
+          <div class="batt-row">
+            <div class="batt-gauge-sm">
+              <div id="batt-fill" class="batt-fill-sm"></div>
+            </div>
+            <span id="batt-volts" class="mono batt-val">--.-V</span>
+            <span id="batt-pct" class="mono batt-pct-sm">--%</span>
+          </div>
+        </div>
+
+        <div class="stat-group">
+          <div class="stat-group-title">MODE</div>
+          <div class="mode-row">
+            <button class="mode-btn-sm active" data-mode="idle">IDLE</button>
+            <button class="mode-btn-sm" data-mode="teleop">TELEOP</button>
+            <button class="mode-btn-sm" data-mode="slam">SLAM</button>
+            <button class="mode-btn-sm" data-mode="navigation">NAV</button>
+            <button class="mode-btn-sm" data-mode="slam_nav">S+N</button>
+          </div>
+          <div id="nav-map-select" class="nav-map-row hidden">
+            <input type="text" id="nav-map-path" class="text-input-sm mono" placeholder="/home/brian/maps/my_map.yaml">
+            <button id="apply-mode-btn" class="sm-btn primary">GO</button>
+          </div>
+          <div id="mode-status-msg" class="status-msg"></div>
+        </div>
+
+        <div class="stat-group">
+          <div class="stat-group-title">SAVE MAP</div>
+          <div class="save-map-row">
+            <input type="text" id="map-save-name" class="text-input-sm mono" placeholder="my_map">
+            <button id="save-map-btn" class="sm-btn">SAVE</button>
+          </div>
+          <div id="save-map-msg" class="status-msg"></div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ── DRIVE PANEL ──────────────────────────────── -->
+    <div class="panel" id="panel-drive" style="grid-area:drive">
+      <div class="panel-title">
+        DRIVE
+        <span id="input-source" class="panel-title-info mono">KB</span>
+      </div>
+      <div class="panel-body panel-body-drive">
+        <div class="drive-col joy-col">
+          <div class="joy-zone" id="joy-translate"></div>
+          <div class="joy-label">TRANSLATE</div>
+        </div>
+        <div class="drive-col mid-col">
+          <div class="slider-row">
+            <span class="slider-label">LIN</span>
+            <input type="range" id="spd-linear" min="0.1" max="1.0" step="0.05" value="0.3">
+            <span id="spd-linear-val" class="mono slider-val">0.30</span>
+          </div>
+          <div class="slider-row">
+            <span class="slider-label">ANG</span>
+            <input type="range" id="spd-angular" min="0.1" max="3.0" step="0.1" value="1.0">
+            <span id="spd-angular-val" class="mono slider-val">1.0</span>
+          </div>
+          <div class="vel-display">
+            <span class="vel-item">VX <span id="vx-disp" class="mono">+0.00</span></span>
+            <span class="vel-item">VY <span id="vy-disp" class="mono">+0.00</span></span>
+            <span class="vel-item">WZ <span id="wz-disp" class="mono">+0.00</span></span>
+          </div>
+          <div class="kbd-hints">
+            <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span>
+            <span><kbd>Q</kbd><kbd>E</kbd></span>
+          </div>
+          <div class="lidar-container" id="lidar-container">
+            <canvas id="lidar-canvas"></canvas>
+          </div>
+        </div>
+        <div class="drive-col joy-col">
+          <div class="joy-zone" id="joy-rotate"></div>
+          <div class="joy-label">ROTATE</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── GRAPHS PANEL ─────────────────────────────── -->
+    <div class="panel" id="panel-graphs" style="grid-area:graphs">
+      <div class="panel-title">TELEMETRY</div>
+      <div class="panel-body panel-body-graphs">
+        <div class="sparkline-grid">
+          <div class="sparkline-card">
+            <span class="sparkline-label">VX</span>
+            <canvas class="sparkline-canvas" id="spark-vx"></canvas>
+          </div>
+          <div class="sparkline-card">
+            <span class="sparkline-label">VY</span>
+            <canvas class="sparkline-canvas" id="spark-vy"></canvas>
+          </div>
+          <div class="sparkline-card">
+            <span class="sparkline-label">WZ</span>
+            <canvas class="sparkline-canvas" id="spark-wz"></canvas>
+          </div>
+          <div class="sparkline-card">
+            <span class="sparkline-label">BATT</span>
+            <canvas class="sparkline-canvas" id="spark-batt"></canvas>
+          </div>
+        </div>
+        <div class="tf-section">
+          <div class="tf-title">TF TREE</div>
+          <div id="tf-tree" class="tf-tree mono"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── DIAGNOSTICS PANEL ────────────────────────── -->
+    <div class="panel" id="panel-diag" style="grid-area:diag">
+      <div class="panel-title">
+        DIAGNOSTICS
+        <span class="panel-title-actions">
+          <button class="sm-btn filter-btn active" data-severity="all">ALL</button>
+          <button class="sm-btn filter-btn" data-severity="info">INFO</button>
+          <button class="sm-btn filter-btn" data-severity="warn">WARN</button>
+          <button class="sm-btn filter-btn" data-severity="err">ERR</button>
+        </span>
+      </div>
+      <div class="panel-body panel-body-scroll">
+        <div id="log-container" class="log-container mono"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══════════════════ E-STOP ═══════════════════ -->
+  <button id="estop-btn" title="Emergency Stop (Spacebar)">
+    <span class="estop-icon">&#9632;</span>
+    <span class="estop-label">STOP</span>
+  </button>
+
+  <!-- ═══════════════════ TOAST ═══════════════════ -->
+  <div id="toast" class="toast"></div>
+
+  <!-- ═══════════════════ SCRIPTS ═══════════════════ -->
+  <script src="js/lib/roslib.min.js"></script>
+  <script src="js/lib/nipplejs.min.js"></script>
+  <script type="module" src="js/aio-app.js"></script>
+</body>
+</html>
