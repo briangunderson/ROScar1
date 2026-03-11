@@ -234,6 +234,25 @@ input[type=range]::-moz-range-thumb {
   background: rgba(8,17,26,.85);
   font-size: 11px; font-weight: 600; letter-spacing: 3px; color: var(--text-dim);
 }
+
+/* CV detection overlay on camera panel */
+.cv-detection-overlay {
+  position: absolute;
+  bottom: 2.2rem;
+  left: 0.4rem;
+  right: 0.4rem;
+  padding: 0.2rem 0.5rem;
+  background: rgba(0, 0, 0, 0.7);
+  color: #0f0;
+  font: 600 0.7rem 'Rajdhani', sans-serif;
+  letter-spacing: 0.04em;
+  border-radius: 3px;
+  pointer-events: none;
+  z-index: 5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .camera-ctrls {
   display: flex; gap: 8px; padding: 4px 8px;
   align-items: center; justify-content: center;

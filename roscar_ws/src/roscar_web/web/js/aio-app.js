@@ -12,6 +12,7 @@ import { initMap, enableNavGoalMode, clearMap }  from './aio-map.js';
 import { initGraphs }       from './aio-graphs.js';
 import { initDiagnostics }  from './aio-diagnostics.js';
 import { initTF }           from './aio-tf.js';
+import { initCV }           from './aio-cv.js';
 
 // ── Connection config ────────────────────────────────────────────────────
 export const HOST  = window.location.hostname || 'localhost';
@@ -113,6 +114,7 @@ function setConnUI(ok) {
 // ── Init all modules ─────────────────────────────────────────────────────
 initTeleop(getOrCreateCmdVelPub);
 initCamera();
+initCV(getRos);
 initStatus();
 initLidar(getRos);
 initMap(getRos);
