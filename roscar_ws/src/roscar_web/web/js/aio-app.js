@@ -14,6 +14,7 @@ import { initDiagnostics }  from './aio-diagnostics.js';
 import { initTF }           from './aio-tf.js';
 import { initSpaceMouse, requestSpaceMouse, isSpaceMouseConnected } from './aio-spacemouse.js';
 import { initLidarCam }     from './aio-lidar-cam.js';
+import { initCV }           from './aio-cv.js';
 
 // ── Connection config ────────────────────────────────────────────────────
 export const HOST  = window.location.hostname || 'localhost';
@@ -125,6 +126,7 @@ function setConnUI(ok) {
 // ── Init all modules ─────────────────────────────────────────────────────
 initTeleop(getOrCreateCmdVelPub);
 initCamera();
+initCV(getRos);
 initStatus();
 initLidar(getRos);
 initMap(getRos);

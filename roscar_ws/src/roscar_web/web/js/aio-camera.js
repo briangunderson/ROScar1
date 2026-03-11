@@ -9,7 +9,7 @@ let quality    = 80;
 let resolution = '640x480';
 let streaming  = false;
 
-const TOPIC = '/image_raw';
+let topic = '/image_raw';
 const PANEL = '#panel-camera';
 const RETRY_INTERVAL = 3000; // ms — retry stream when offline
 
@@ -19,6 +19,11 @@ export function initCamera() {
   setupControls();
   onAppEvent((ev) => {
     if (ev === 'connected') startStream();
+  });
+  // CV feed toggle: switch between /image_raw and /image_annotated
+  window.addEventListener('cv-feed-change', (e) => {
+    topic = e.detail.annotated ? '/image_annotated' : '/image_raw';
+    startStream();
   });
   // Periodic retry: when the stream is down (e.g. camera node not yet
   // running after a mode switch), re-attempt every few seconds.
@@ -31,7 +36,7 @@ export function initCamera() {
 function streamUrl() {
   const [w, h] = resolution.split('x');
   return `http://${HOST}:${PORTS.video}/stream?` +
-    `topic=${TOPIC}&quality=${quality}&width=${w}&height=${h}&type=mjpeg`;
+    `topic=${topic}&quality=${quality}&width=${w}&height=${h}&type=mjpeg`;
 }
 
 // ── Start / Stop ───────────────────────────────────────────────────────────
