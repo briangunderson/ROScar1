@@ -1,6 +1,7 @@
 /**
  * aio-map.js — OccupancyGrid renderer + robot pose overlay + click-to-navigate.
- * Always active (no tab gating). Subscribes to /map and /odometry/filtered.
+ * Always active (no tab gating). Subscribes to /map for the grid, uses TFClient
+ * (map→odom→base_footprint) for SLAM-corrected pose, falls back to /odometry/filtered.
  * Supports pan (drag), zoom (buttons + scroll), Nav2 goal via action client.
  */
 
@@ -9,6 +10,8 @@ import { onAppEvent, toast } from './aio-app.js';
 let getRos;
 let mapSub   = null;
 let poseSub  = null;
+let tfClient = null;
+let hasTFPose = false;  // true when TFClient is providing map-frame poses
 let mapData  = null;    // {width, height, resolution, origin, data[]}
 let robotPos = null;    // {x, y, yaw}
 
@@ -31,12 +34,20 @@ export function initMap(getRosFn) {
   setupControls();
   setupResizeObserver();
   onAppEvent((ev) => {
-    if (ev === 'connected') { subscribeMap(); subscribePose(); }
+    if (ev === 'connected') { subscribeMap(); subscribePose(); subscribeTF(); }
   });
   startRAFLoop();
 }
 
 export function enableNavGoalMode() { setNavGoalMode(true); }
+
+/** Clear local map data so the canvas shows the "NO MAP DATA" placeholder. */
+export function clearMap() {
+  mapData = null;
+  robotPos = null;
+  hasTFPose = false;
+  needsDraw = true;
+}
 
 // ── Subscriptions ───────────────────────────────────────────────────────────
 function subscribeMap() {
@@ -77,10 +88,34 @@ function subscribePose() {
     throttle_rate: 200,
   });
   poseSub.subscribe((msg) => {
+    // Only use odom as fallback when TFClient isn't providing map-frame poses
+    if (hasTFPose) return;
     const q = msg.pose.pose.orientation;
     const p = msg.pose.pose.position;
     robotPos = {
       x: p.x, y: p.y,
+      yaw: Math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z)),
+    };
+    needsDraw = true;
+  });
+}
+
+function subscribeTF() {
+  const ros = getRos(); if (!ros) return;
+  if (tfClient) { try { tfClient.dispose(); } catch (_) {} }
+  tfClient = new ROSLIB.TFClient({
+    ros,
+    fixedFrame: 'map',
+    angularThres: 0.01,
+    transThres: 0.01,
+    rate: 10.0,
+  });
+  tfClient.subscribe('base_footprint', (tf) => {
+    hasTFPose = true;
+    const q = tf.rotation;
+    robotPos = {
+      x: tf.translation.x,
+      y: tf.translation.y,
       yaw: Math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z)),
     };
     needsDraw = true;
@@ -232,13 +267,28 @@ function drawRobotPose(ctx) {
   ctx.restore();
 }
 
+// ── Zoom helper (zoom toward a canvas point) ───────────────────────────────
+function zoomAtPoint(factor, cx, cy) {
+  // World point under (cx, cy) before zoom
+  const wx = (cx - viewOffset.x) / viewScale;
+  const wy = (cy - viewOffset.y) / viewScale;
+  // Apply new scale (clamp to minimum)
+  viewScale = Math.max(0.5, viewScale * factor);
+  // Adjust offset so the same world point stays under (cx, cy)
+  viewOffset.x = cx - wx * viewScale;
+  viewOffset.y = cy - wy * viewScale;
+  needsDraw = true;
+}
+
 // ── Controls ────────────────────────────────────────────────────────────────
 function setupControls() {
   document.getElementById('map-zoom-in').addEventListener('click', () => {
-    viewScale *= 1.25; needsDraw = true;
+    const cv = getCanvas();
+    zoomAtPoint(1.25, cv ? cv.width / 2 : 0, cv ? cv.height / 2 : 0);
   });
   document.getElementById('map-zoom-out').addEventListener('click', () => {
-    viewScale = Math.max(0.5, viewScale / 1.25); needsDraw = true;
+    const cv = getCanvas();
+    zoomAtPoint(1 / 1.25, cv ? cv.width / 2 : 0, cv ? cv.height / 2 : 0);
   });
   document.getElementById('map-reset').addEventListener('click', () => {
     fitMapToCanvas(); needsDraw = true;
@@ -279,12 +329,14 @@ function setupControls() {
   }, { passive: true });
   c.addEventListener('touchend', () => { touchStart = null; });
 
-  // Scroll zoom
+  // Scroll zoom (toward cursor)
   c.addEventListener('wheel', (e) => {
     e.preventDefault();
+    const rect = c.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
     const factor = e.deltaY < 0 ? 1.1 : 0.9;
-    viewScale = Math.max(0.5, viewScale * factor);
-    needsDraw = true;
+    zoomAtPoint(factor, cx, cy);
   }, { passive: false });
 
   // Nav goal on click

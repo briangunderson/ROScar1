@@ -5,6 +5,7 @@
  */
 
 import { getRos, isConnected, onAppEvent, toast } from './aio-app.js';
+import { clearMap } from './aio-map.js';
 
 // ── Constants ───────────────────────────────────────────────────────────────
 const BATT_MIN = 10.0;
@@ -44,6 +45,7 @@ function showMsg(el, text, type = '') {
 export function initStatus() {
   setupModeButtons();
   setupMapSave();
+  setupMapReset();
   onAppEvent((ev) => {
     if (ev === 'connected') {
       subscribeAll();
@@ -288,6 +290,56 @@ function setupMapSave() {
         showMsg(msgEl, 'Failed: ' + (resp.message || 'unknown'), 'err');
         toast('Map save failed', 'err');
       }
+    });
+  });
+}
+
+// ── Map Reset (cycle mode to restart slam_toolbox) ──────────────────────────
+function setupMapReset() {
+  const resetBtn = document.getElementById('reset-map-btn');
+  const msgEl    = document.getElementById('save-map-msg');
+
+  if (!resetBtn) return;
+
+  resetBtn.addEventListener('click', () => {
+    // Only meaningful if we're in a SLAM mode
+    if (currentMode !== 'slam' && currentMode !== 'slam_nav') {
+      showMsg(msgEl, 'Reset only works in SLAM modes', 'err');
+      return;
+    }
+    if (!setModeSvc) {
+      showMsg(msgEl, 'Not connected to launch_manager', 'err');
+      return;
+    }
+
+    const restoreMode = currentMode;
+    showMsg(msgEl, 'Resetting map...');
+    clearMap();
+    toast('Resetting SLAM map...', 'ok');
+
+    // Step 1: switch to idle (kills slam_toolbox)
+    const idleReq = new ROSLIB.ServiceRequest({ mode: 'idle', map_path: '' });
+    setModeSvc.callService(idleReq, (resp) => {
+      if (!resp.success) {
+        showMsg(msgEl, 'Reset failed (idle): ' + (resp.message || ''), 'err');
+        return;
+      }
+      // Step 2: switch back to SLAM mode (restarts slam_toolbox with fresh map)
+      const restoreReq = new ROSLIB.ServiceRequest({ mode: restoreMode, map_path: '' });
+      setModeSvc.callService(restoreReq, (resp2) => {
+        if (resp2.success) {
+          currentMode = restoreMode;
+          setEl('mode-display', restoreMode.toUpperCase());
+          showMsg(msgEl, 'Map reset — fresh SLAM started', 'ok');
+          toast('Map reset!', 'ok');
+          if ((restoreMode === 'slam_nav') && navGoalCallback) {
+            navGoalCallback(true);
+          }
+        } else {
+          showMsg(msgEl, 'Reset failed (restore): ' + (resp2.message || ''), 'err');
+          toast('Map reset failed on restore', 'err');
+        }
+      });
     });
   });
 }
