@@ -130,7 +130,7 @@ function subscribe() {
   rosoutSub = new ROSLIB.Topic({
     ros,
     name: '/rosout',
-    messageType: 'rcl_interfaces/msg/Log',
+    messageType: 'rcl_interfaces/Log',
   });
 
   rosoutSub.subscribe((msg) => {

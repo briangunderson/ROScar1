@@ -4,7 +4,7 @@
  * Always active (no tab gating).
  */
 
-import { getRos, isConnected, onAppEvent, toast, HOST } from './aio-app.js';
+import { getRos, isConnected, onAppEvent, toast } from './aio-app.js';
 
 // ── Constants ───────────────────────────────────────────────────────────────
 const BATT_MIN = 10.0;
@@ -37,7 +37,7 @@ function setEl(id, val) {
 function showMsg(el, text, type = '') {
   if (!el) return;
   el.textContent = text;
-  el.className = 'mode-status-msg' + (type ? ' ' + type : '');
+  el.className = 'status-msg' + (type ? ' ' + type : '');
 }
 
 // ── Init ────────────────────────────────────────────────────────────────────

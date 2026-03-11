@@ -22,7 +22,7 @@ function subscribe() {
   const tfTopic = new ROSLIB.Topic({
     ros,
     name: '/tf',
-    messageType: 'tf2_msgs/msg/TFMessage',
+    messageType: 'tf2_msgs/TFMessage',
     throttle_rate: 1000,
   });
   tfTopic.subscribe((msg) => handleTFMsg(msg, false));
@@ -31,7 +31,7 @@ function subscribe() {
   const tfStaticTopic = new ROSLIB.Topic({
     ros,
     name: '/tf_static',
-    messageType: 'tf2_msgs/msg/TFMessage',
+    messageType: 'tf2_msgs/TFMessage',
     throttle_rate: 0,
   });
   tfStaticTopic.subscribe((msg) => handleTFMsg(msg, true));

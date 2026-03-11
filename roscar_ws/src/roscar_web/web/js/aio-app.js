@@ -6,9 +6,9 @@
 
 import { initTeleop }      from './aio-teleop.js';
 import { initCamera }      from './aio-camera.js';
-import { initStatus }      from './aio-status.js';
+import { initStatus, onNavModeChange } from './aio-status.js';
 import { initLidar }       from './aio-lidar.js';
-import { initMap }          from './aio-map.js';
+import { initMap, enableNavGoalMode }  from './aio-map.js';
 import { initGraphs }       from './aio-graphs.js';
 import { initDiagnostics }  from './aio-diagnostics.js';
 import { initTF }           from './aio-tf.js';
@@ -113,9 +113,10 @@ function setConnUI(ok) {
 // ── Init all modules ─────────────────────────────────────────────────────
 initTeleop(getOrCreateCmdVelPub);
 initCamera();
-initStatus(getRos);
+initStatus();
 initLidar(getRos);
 initMap(getRos);
+onNavModeChange(enableNavGoalMode);
 initGraphs();
 initDiagnostics(getRos);
 initTF(getRos);
