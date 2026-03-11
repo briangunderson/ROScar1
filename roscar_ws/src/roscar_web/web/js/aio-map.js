@@ -3,6 +3,10 @@
  * Always active (no tab gating). Subscribes to /map for the grid, uses TFClient
  * (map→odom→base_footprint) for SLAM-corrected pose, falls back to /odometry/filtered.
  * Supports pan (drag), zoom (buttons + scroll), Nav2 goal via action client.
+ *
+ * Two view modes:
+ *   FREE   — manual pan/zoom, robot arrow moves on the map
+ *   LOCKED — robot fixed at canvas center facing up, map rotates/pans underneath
  */
 
 import { onAppEvent, toast } from './aio-app.js';
@@ -20,6 +24,9 @@ let viewScale  = 1.0;
 let viewOffset = { x: 0, y: 0 };
 let dragging   = false;
 let dragStart  = { x: 0, y: 0, ox: 0, oy: 0 };
+
+// Robot-locked mode: robot at center, map rotates with heading
+let robotLocked = false;
 
 let navGoalMode = false;
 let goalActionClient = null;
@@ -73,7 +80,7 @@ function subscribeMap() {
     setEl('map-res-disp',  `${(msg.info.resolution * 100).toFixed(0)}cm`);
     // Re-fit view when map dimensions or origin change (grid expanded by SLAM)
     if (w !== prevW || h !== prevH || ox !== prevOriginX || oy !== prevOriginY) {
-      fitMapToCanvas();
+      if (!robotLocked) fitMapToCanvas();
       prevW = w; prevH = h; prevOriginX = ox; prevOriginY = oy;
     }
     needsDraw = true;
@@ -163,6 +170,32 @@ function fitMapToCanvas() {
   viewOffset.y = (c.height - mapData.width  * viewScale) / 2;
 }
 
+// ── Robot-to-screen helpers (shared by draw + nav goal) ─────────────────────
+/** Map-pixel coords for the robot in the raw OccupancyGrid image. */
+function robotMapPixel() {
+  if (!robotPos || !mapData) return null;
+  return {
+    col: (robotPos.x - mapData.origin.x) / mapData.resolution,
+    row: (robotPos.y - mapData.origin.y) / mapData.resolution,
+  };
+}
+
+/**
+ * In locked mode, compute viewOffset so the robot (after the 90° CCW map
+ * rotation + scale) sits exactly at canvas center.  Called every frame.
+ */
+function computeLockedOffset(c) {
+  const rp = robotMapPixel();
+  if (!rp) return;
+  // In the 90° CCW rotated + scaled space (before viewOffset):
+  //   screenX_local = (h - row) * viewScale
+  //   screenY_local = (w - col) * viewScale
+  const ccx = c.width  / 2;
+  const ccy = c.height / 2;
+  viewOffset.x = ccx - (mapData.height - rp.row) * viewScale;
+  viewOffset.y = ccy - (mapData.width  - rp.col) * viewScale;
+}
+
 // ── RAF loop (always running) ───────────────────────────────────────────────
 function startRAFLoop() {
   function frame() {
@@ -185,6 +218,9 @@ function drawMap() {
     ctx.fillText('NO MAP DATA \u2014 launch SLAM or NAV mode', c.width / 2, c.height / 2);
     return;
   }
+
+  // In locked mode, recompute viewOffset each frame to track the robot
+  if (robotLocked) computeLockedOffset(c);
 
   // Render OccupancyGrid as ImageData
   const imgData = ctx.createImageData(mapData.width, mapData.height);
@@ -209,6 +245,16 @@ function drawMap() {
   offscreen.getContext('2d').putImageData(imgData, 0, 0);
 
   ctx.save();
+
+  // In locked mode: rotate entire scene around canvas center by +yaw
+  // so the robot heading (which draws at -yaw) nets to 0 = pointing up
+  if (robotLocked && robotPos) {
+    const ccx = c.width / 2, ccy = c.height / 2;
+    ctx.translate(ccx, ccy);
+    ctx.rotate(robotPos.yaw);
+    ctx.translate(-ccx, -ccy);
+  }
+
   ctx.translate(viewOffset.x, viewOffset.y);
   ctx.scale(viewScale, viewScale);
   // 90deg CCW rotation: forward (ROS +X) -> screen UP, left (ROS +Y) -> screen LEFT
@@ -220,31 +266,52 @@ function drawMap() {
 
   // Robot pose overlay
   if (robotPos && mapData) {
-    drawRobotPose(ctx);
+    if (robotLocked) {
+      drawRobotPoseLocked(ctx, c);
+    } else {
+      drawRobotPose(ctx);
+    }
   }
 }
 
+/** Free mode: robot drawn at computed screen position, arrow rotated by heading. */
 function drawRobotPose(ctx) {
-  // Convert world coords to canvas coords (90deg CCW rotated view)
   const ox  = mapData.origin.x;
   const oy  = mapData.origin.y;
   const res = mapData.resolution;
   const w   = mapData.width;
   const h   = mapData.height;
 
-  // Map pixel coords
   const mpx = (robotPos.x - ox) / res;
   const mpy = (robotPos.y - oy) / res;
 
-  // Screen coords: forward(+mpx)->UP, left(+mpy)->LEFT
   const sx = viewOffset.x + (h - mpy) * viewScale;
   const sy = viewOffset.y + (w - mpx) * viewScale;
 
   ctx.save();
   ctx.translate(sx, sy);
   ctx.rotate(-robotPos.yaw);
+  drawArrow(ctx);
+  ctx.restore();
 
-  // Arrow shape
+  drawRing(ctx, sx, sy);
+}
+
+/** Locked mode: robot fixed at canvas center, arrow always points up. */
+function drawRobotPoseLocked(ctx, c) {
+  const ccx = c.width / 2, ccy = c.height / 2;
+
+  ctx.save();
+  ctx.translate(ccx, ccy);
+  // No rotation — arrow already points up
+  drawArrow(ctx);
+  ctx.restore();
+
+  drawRing(ctx, ccx, ccy);
+}
+
+/** Shared arrow shape (points up from local origin). */
+function drawArrow(ctx) {
   ctx.fillStyle = '#FF8C00';
   ctx.strokeStyle = '#FF8C00';
   ctx.lineWidth = 1;
@@ -255,9 +322,10 @@ function drawRobotPose(ctx) {
   ctx.lineTo(-6, 6);
   ctx.closePath();
   ctx.fill();
-  ctx.restore();
+}
 
-  // Position ring
+/** Shared position ring. */
+function drawRing(ctx, sx, sy) {
   ctx.save();
   ctx.strokeStyle = 'rgba(255,140,0,0.35)';
   ctx.lineWidth = 1;
@@ -269,6 +337,12 @@ function drawRobotPose(ctx) {
 
 // ── Zoom helper (zoom toward a canvas point) ───────────────────────────────
 function zoomAtPoint(factor, cx, cy) {
+  if (robotLocked) {
+    // In locked mode just change scale — centering is recomputed each frame
+    viewScale = Math.max(0.5, viewScale * factor);
+    needsDraw = true;
+    return;
+  }
   // World point under (cx, cy) before zoom
   const wx = (cx - viewOffset.x) / viewScale;
   const wy = (cy - viewOffset.y) / viewScale;
@@ -277,6 +351,19 @@ function zoomAtPoint(factor, cx, cy) {
   // Adjust offset so the same world point stays under (cx, cy)
   viewOffset.x = cx - wx * viewScale;
   viewOffset.y = cy - wy * viewScale;
+  needsDraw = true;
+}
+
+// ── Lock toggle ─────────────────────────────────────────────────────────────
+function toggleLock() {
+  robotLocked = !robotLocked;
+  const btn = document.getElementById('map-lock');
+  if (btn) {
+    btn.textContent = robotLocked ? '\u{1F512}' : '\u{1F513}';
+    btn.title = robotLocked ? 'Unlock map (free pan)' : 'Lock to robot (heading up)';
+    btn.classList.toggle('active', robotLocked);
+  }
+  // When unlocking, preserve current view (viewOffset is already set)
   needsDraw = true;
 }
 
@@ -291,16 +378,18 @@ function setupControls() {
     zoomAtPoint(1 / 1.25, cv ? cv.width / 2 : 0, cv ? cv.height / 2 : 0);
   });
   document.getElementById('map-reset').addEventListener('click', () => {
+    if (robotLocked) toggleLock(); // exit locked mode
     fitMapToCanvas(); needsDraw = true;
   });
+  document.getElementById('map-lock').addEventListener('click', toggleLock);
   document.getElementById('cancel-goal-btn').addEventListener('click', cancelGoal);
 
   const c = getCanvas();
   if (!c) return;
 
-  // Pan via drag
+  // Pan via drag (disabled when locked)
   c.addEventListener('mousedown', (e) => {
-    if (navGoalMode) return;
+    if (navGoalMode || robotLocked) return;
     dragging = true;
     dragStart = { x: e.clientX, y: e.clientY, ox: viewOffset.x, oy: viewOffset.y };
   });
@@ -313,10 +402,10 @@ function setupControls() {
   c.addEventListener('mouseup', () => { dragging = false; });
   c.addEventListener('mouseleave', () => { dragging = false; });
 
-  // Touch pan
+  // Touch pan (disabled when locked)
   let touchStart = null;
   c.addEventListener('touchstart', (e) => {
-    if (navGoalMode || e.touches.length !== 1) return;
+    if (navGoalMode || robotLocked || e.touches.length !== 1) return;
     const t = e.touches[0];
     touchStart = { x: t.clientX, y: t.clientY, ox: viewOffset.x, oy: viewOffset.y };
   }, { passive: true });
@@ -329,7 +418,7 @@ function setupControls() {
   }, { passive: true });
   c.addEventListener('touchend', () => { touchStart = null; });
 
-  // Scroll zoom (toward cursor)
+  // Scroll zoom (toward cursor in free mode, centered in locked mode)
   c.addEventListener('wheel', (e) => {
     e.preventDefault();
     const rect = c.getBoundingClientRect();
@@ -353,9 +442,21 @@ function setupControls() {
 function sendNavGoal(canvasX, canvasY) {
   if (!goalActionClient) { toast('Nav2 not connected', 'err'); return; }
 
-  // Canvas -> map pixel -> world (inverse of 90deg CCW rotated view)
-  const mpx = mapData.width  - (canvasY - viewOffset.y) / viewScale;
-  const mpy = mapData.height - (canvasX - viewOffset.x) / viewScale;
+  let ux = canvasX, uy = canvasY;
+
+  // In locked mode, undo the scene rotation around canvas center
+  if (robotLocked && robotPos) {
+    const c = getCanvas();
+    const ccx = c.width / 2, ccy = c.height / 2;
+    const dx = canvasX - ccx, dy = canvasY - ccy;
+    const cosA = Math.cos(-robotPos.yaw), sinA = Math.sin(-robotPos.yaw);
+    ux = dx * cosA - dy * sinA + ccx;
+    uy = dx * sinA + dy * cosA + ccy;
+  }
+
+  // Unrotated canvas → map pixel → world (inverse of 90° CCW rotated view)
+  const mpx = mapData.width  - (uy - viewOffset.y) / viewScale;
+  const mpy = mapData.height - (ux - viewOffset.x) / viewScale;
   const wx  = mapData.origin.x + mpx * mapData.resolution;
   const wy  = mapData.origin.y + mpy * mapData.resolution;
 
