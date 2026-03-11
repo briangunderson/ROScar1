@@ -232,13 +232,28 @@ function drawRobotPose(ctx) {
   ctx.restore();
 }
 
+// ── Zoom helper (zoom toward a canvas point) ───────────────────────────────
+function zoomAtPoint(factor, cx, cy) {
+  // World point under (cx, cy) before zoom
+  const wx = (cx - viewOffset.x) / viewScale;
+  const wy = (cy - viewOffset.y) / viewScale;
+  // Apply new scale (clamp to minimum)
+  viewScale = Math.max(0.5, viewScale * factor);
+  // Adjust offset so the same world point stays under (cx, cy)
+  viewOffset.x = cx - wx * viewScale;
+  viewOffset.y = cy - wy * viewScale;
+  needsDraw = true;
+}
+
 // ── Controls ────────────────────────────────────────────────────────────────
 function setupControls() {
   document.getElementById('map-zoom-in').addEventListener('click', () => {
-    viewScale *= 1.25; needsDraw = true;
+    const cv = getCanvas();
+    zoomAtPoint(1.25, cv ? cv.width / 2 : 0, cv ? cv.height / 2 : 0);
   });
   document.getElementById('map-zoom-out').addEventListener('click', () => {
-    viewScale = Math.max(0.5, viewScale / 1.25); needsDraw = true;
+    const cv = getCanvas();
+    zoomAtPoint(1 / 1.25, cv ? cv.width / 2 : 0, cv ? cv.height / 2 : 0);
   });
   document.getElementById('map-reset').addEventListener('click', () => {
     fitMapToCanvas(); needsDraw = true;
@@ -279,12 +294,14 @@ function setupControls() {
   }, { passive: true });
   c.addEventListener('touchend', () => { touchStart = null; });
 
-  // Scroll zoom
+  // Scroll zoom (toward cursor)
   c.addEventListener('wheel', (e) => {
     e.preventDefault();
+    const rect = c.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
     const factor = e.deltaY < 0 ? 1.1 : 0.9;
-    viewScale = Math.max(0.5, viewScale * factor);
-    needsDraw = true;
+    zoomAtPoint(factor, cx, cy);
   }, { passive: false });
 
   // Nav goal on click
