@@ -213,10 +213,7 @@ input[type=range]::-moz-range-thumb {
 /* ═══════════════════════════════════════════════════════
    PANEL: CAMERA
    ═══════════════════════════════════════════════════════ */
-#panel-camera {
-  position: relative;
-  z-index: 10000;          /* lift above body::after scanline overlay (z-index:9999) */
-}
+#panel-camera {}
 #panel-camera .panel-body {
   display: flex; flex-direction: column;
 }
@@ -546,10 +543,13 @@ input[type=range]::-moz-range-thumb {
 #toast.err  { border-color: var(--red); color: var(--red); }
 
 /* ═══════════════════════════════════════════════════════
-   SCANLINE OVERLAY (subtle CRT texture)
+   SCANLINE OVERLAY (subtle CRT texture — per-panel, not camera)
    ═══════════════════════════════════════════════════════ */
-body::after {
-  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 9999;
+.panel {
+  position: relative;   /* anchor for ::after scanline layer */
+}
+.panel::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 50;
   background: repeating-linear-gradient(
     to bottom,
     transparent 0px,
@@ -558,6 +558,7 @@ body::after {
     rgba(0,0,0,.04) 4px
   );
 }
+#panel-camera::after { display: none; }  /* keep camera feed clean */
 
 /* ═══════════════════════════════════════════════════════
    SCROLLBAR (thin, themed)
