@@ -5,18 +5,26 @@
 
 import { HOST, PORTS, onAppEvent, toast } from './aio-app.js';
 
-let quality    = 20;
-let resolution = '320x240';
+let quality    = 80;
+let resolution = '640x480';
 let streaming  = false;
 
 const TOPIC = '/image_raw';
 const PANEL = '#panel-camera';
+const RETRY_INTERVAL = 3000; // ms — retry stream when offline
+
+let retryTimer = null;
 
 export function initCamera() {
   setupControls();
   onAppEvent((ev) => {
     if (ev === 'connected') startStream();
   });
+  // Periodic retry: when the stream is down (e.g. camera node not yet
+  // running after a mode switch), re-attempt every few seconds.
+  retryTimer = setInterval(() => {
+    if (!streaming) startStream();
+  }, RETRY_INTERVAL);
 }
 
 // ── Build stream URL ───────────────────────────────────────────────────────
@@ -47,6 +55,8 @@ function startStream() {
     streaming = false;
   };
 
+  // Force the browser to re-request by busting any cached failed response
+  img.src = '';
   img.src = streamUrl();
   overlay.style.display = 'none'; // optimistic hide
 
