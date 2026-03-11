@@ -37,7 +37,7 @@ function subscribeDetections() {
   detectSub = new ROSLIB.Topic({
     ros,
     name: '/detections',
-    messageType: 'vision_msgs/msg/Detection2DArray',
+    messageType: 'vision_msgs/Detection2DArray',
     throttle_rate: 500,  // 2 Hz — UI doesn't need faster
   });
   detectSub.subscribe((msg) => {
