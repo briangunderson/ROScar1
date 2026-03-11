@@ -359,7 +359,7 @@ function toggleLock() {
   robotLocked = !robotLocked;
   const btn = document.getElementById('map-lock');
   if (btn) {
-    btn.textContent = robotLocked ? '\u{1F512}' : '\u{1F513}';
+    btn.textContent = robotLocked ? 'L' : 'L';
     btn.title = robotLocked ? 'Unlock map (free pan)' : 'Lock to robot (heading up)';
     btn.classList.toggle('active', robotLocked);
   }
