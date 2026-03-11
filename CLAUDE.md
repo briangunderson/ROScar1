@@ -68,6 +68,7 @@ Key: EKF owns odom->base_footprint TF (driver publish_odom_tf=false)
 | `roscar_bringup` | ament_cmake | Launch files, EKF/IMU filter configs |
 | `roscar_interfaces` | ament_cmake | Custom .srv: SetMode, SaveMap, GetStatus |
 | `roscar_web` | ament_python | Web dashboard: backend nodes + static frontend |
+| `roscar_cv` | ament_python | CV nodes: ArUco + YOLO (runs on remote GPU PC, not Pi) |
 
 ## Key Topics
 
@@ -88,6 +89,10 @@ Key: EKF owns odom->base_footprint TF (driver publish_odom_tf=false)
 | `/map` | OccupancyGrid | slam_toolbox | SLAM-generated map |
 | `/plan` | Path | planner_server | Global navigation path |
 | `/local_plan` | Path | controller_server | Local trajectory |
+| `/aruco/markers` | MarkerArray | aruco_detector_node | Detected ArUco marker visualizations |
+| `/aruco/image` | Image | aruco_detector_node | Debug view with marker outlines |
+| `/detections` | Detection2DArray | yolo_detector_node | YOLO detection results |
+| `/image_annotated` | Image | yolo_detector_node | Camera feed with bounding boxes |
 
 ## Rosmaster_Lib API (Key Methods)
 - `Rosmaster(car_type=1, com='/dev/roscar_board', delay=0.002)` - Constructor
@@ -338,6 +343,48 @@ SpaceMouse has its own speed limits, independent of the dashboard speed sliders 
 **Signal pipeline**: raw HID (±350 counts) → deadzone → normalize [-1,+1] → sensitivity curve → scale by max speed → output m/s and rad/s.
 
 **Staleness**: If no HID report for 200ms, velocity returns null (puck released or device sleeping). Sleep indicator shown after 5s of inactivity.
+## Computer Vision (roscar_cv)
+
+### Architecture
+CV processing runs on the dev PC (RTX 4070 via WSL2), NOT on the Pi. Images flow from Pi → PC over CycloneDDS, get processed, and annotated images flow back.
+
+```
+RPi5 (Robot)                          Windows PC (WSL2)
+┌─────────────┐    CycloneDDS     ┌──────────────────────────┐
+│ v4l2_camera  │───/image_raw────>│ aruco_detector_node      │
+│              │                   │   -> /aruco/markers      │
+│              │                   │   -> /aruco/image        │
+│              │                   │   -> TF (marker poses)   │
+│              │                   │                          │
+│              │                   │ yolo_detector_node       │
+│              │                   │   -> /detections         │
+│              │                   │   -> /image_annotated    │
+│ web_video    │<──/image_annotated│ GPU: RTX 4070 (CUDA)    │
+│ _server      │                   └──────────────────────────┘
+└─────────────┘
+```
+
+### Launch (on WSL2 dev PC)
+```bash
+source ~/roscar_ws/install/setup.bash
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+export CYCLONEDDS_URI=file://$HOME/cyclonedds.xml
+ros2 launch roscar_cv cv.launch.py                    # both nodes
+ros2 launch roscar_cv cv.launch.py use_aruco:=false   # YOLO only
+ros2 launch roscar_cv cv.launch.py yolo_model:=yolov8s.pt  # larger model
+```
+
+### Dependencies (WSL2)
+```bash
+sudo apt install ros-jazzy-cv-bridge ros-jazzy-vision-msgs ros-jazzy-image-transport
+pip3 install opencv-contrib-python ultralytics
+pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+```
+
+### Dashboard Integration
+- **Feed toggle**: RAW/CV button in camera panel header switches between `/image_raw` and `/image_annotated`
+- **Detection overlay**: Shows object counts from `/detections` (e.g., "2 person · 1 chair")
+- Module: `aio-cv.js` — imported and initialized by `aio-app.js`
 
 ## Build & Run
 
