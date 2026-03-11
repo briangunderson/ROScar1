@@ -138,6 +138,16 @@ Key: EKF owns odom->base_footprint TF (driver publish_odom_tf=false)
 - **SmacPlanner2D**: No min turning radius (holonomic)
 - **AMCL OmniMotionModel**: Required for mecanum localization
 - **RPi5-tuned**: controller 10Hz, local costmap 5Hz, global costmap 1Hz
+- **Costmap inflation**: 0.08m inflation_radius, cost_scaling_factor 3.0 (tight for indoor use)
+- **Collision monitor**: PolygonStop disabled (robot operates in tight spaces)
+
+### cmd_vel Pipeline (when Nav2 is running)
+```
+controller_server → /cmd_vel → velocity_smoother (20Hz) → /cmd_vel_smoothed → collision_monitor → /cmd_vel → driver
+                                                                                                  ↑
+teleop (joystick/keyboard) ──────────────────────────────────────────────────────────────────────────┘
+```
+**Known issue**: Both teleop and collision_monitor publish to `/cmd_vel`. When Nav2 has a failed goal and enters recovery behaviors, the recovery commands override teleop. Cancel the Nav2 goal to regain manual control. Future fix: add twist_mux for priority-based arbitration.
 
 ### Lifecycle Management (IMPORTANT)
 In ROS2 Jazzy, `async_slam_toolbox_node` is a **lifecycle node**. It starts in "unconfigured" state and will NOT process scans or publish /map until explicitly transitioned through configure → activate. The `slam.launch.py` uses a `nav2_lifecycle_manager` with `autostart: True` and `bond_timeout: 0.0` (slam_toolbox doesn't implement the Nav2 bond interface). The `slam_nav.launch.py` and `navigation.launch.py` get lifecycle management from nav2_bringup's built-in lifecycle manager.
@@ -182,6 +192,15 @@ ros2 launch roscar_bringup navigation.launch.py map:=$HOME/maps/my_map.yaml
 - **web_video_server** port 8080: MJPEG camera stream (`/image_raw`)
 - **http_server_node** port 8888: serves static frontend files from `web/`
 - **launch_manager_node**: ROS2 services to start/stop robot launch modes via subprocess
+
+### Web Nodes (launched by web.launch.py)
+| Node | Package | Purpose |
+|------|---------|---------|
+| rosbridge_websocket | rosbridge_server | WebSocket bridge to ROS2 topics/services/actions |
+| rosapi | rosapi | Provides /rosapi/* services (list nodes, topics, etc.) |
+| web_video_server | web_video_server | MJPEG camera streams over HTTP |
+| launch_manager | roscar_web | Mode switching service (start/stop robot launches) |
+| http_server | roscar_web | Serves dashboard static files |
 
 ### Launch (auto-start on boot)
 The web stack starts automatically via systemd:
@@ -282,7 +301,7 @@ Both Pi (`~/cyclonedds.xml`) and WSL2 (`~/cyclonedds.xml`) use unicast peer disc
 - Pi peers: `localhost` + WSL2's LAN IP (e.g., 192.168.1.194)
 - WSL2 peers: `localhost` + Pi IP (192.168.1.170)
 - `AllowMulticast=false` (multicast doesn't reliably cross WSL2 boundary)
-- **CRITICAL**: WSL2 config MUST include `<Interfaces><NetworkInterface name="eth1" /></Interfaces>` — Docker Desktop creates bridge networks (docker0, br-*) that CycloneDDS may bind to instead of eth1, causing discovery to silently fail even though ping works
+- **CRITICAL**: WSL2 config MUST include `<Interfaces><NetworkInterface name="eth0" /></Interfaces>` (or whichever interface has the LAN IP — check with `ip -4 addr show`). Docker Desktop creates bridge networks that CycloneDDS may bind to instead, causing discovery to silently fail. Interface name can shift between `eth0`/`eth1` after Windows/WSL updates.
 
 ### CRITICAL: ros2 daemon
 The ros2 daemon caches DDS discovery. If started before CycloneDDS env vars are set, it uses FastDDS and cross-machine discovery fails. Kill daemon with `pkill -f ros2.*daemon` and use `--no-daemon` for testing. `ros2 daemon stop` can itself hang if the daemon is in a bad state.
@@ -330,15 +349,18 @@ ros2 run rqt_tf_tree rqt_tf_tree    # TF tree
 - Publishes: `/scan` (sensor_msgs/LaserScan)
 - Launch arg: `use_lidar:=true|false` in robot.launch.py
 
-## Hardware Orientation (CRITICAL)
-The board is mounted 180-deg rotated and motor L/R ports are swapped.
-All sensor/command data is corrected at the hardware boundary in driver_node.py:
+## Hardware Orientation
+The board is mounted 180-deg rotated on the chassis. Motor wiring has been physically
+corrected so all 4 motor ports match their board labels (M1=FL, M2=RL, M3=FR, M4=RR)
+with correct polarity (+PWM = forward). No motor command or odometry sign corrections needed.
+
+IMU/magnetometer sensors are still on the rotated board and need software correction:
 
 | Data | Correction |
 |------|-----------|
-| cmd_vel | `set_car_motion(-vx, -vy, -wz)` |
-| Wheel odom | negate vx, vy ONLY; keep vz (Z-axis angular vel unchanged by yaw rotation) |
-| Accelerometer | negate ALL: ax, ay, az (180-deg + gravity sign convention) |
+| cmd_vel | `set_car_motion(vx, vy, wz)` — no corrections (wiring matches board labels) |
+| Wheel odom | none — STM32 FK produces correct velocities directly |
+| Accelerometer | negate ALL: ax, ay, az (180-deg rotation + gravity sign convention) |
 | Gyroscope | negate ALL: gx, gy, gz (board firmware reports gz inverted) |
 | Magnetometer | negate mx, my; keep mz |
 
@@ -377,3 +399,5 @@ The EKF uses `imu/data_raw` directly (bypassing Madgwick filter) for angular vel
 - [ ] Fine-tune EKF covariances under dynamic conditions
 - [ ] Update Nav2 robot footprint after measuring real dimensions
 - [ ] Tune Nav2 velocity/acceleration limits based on real-world testing
+- [ ] Implement wireless gamepad control (Logitech F710 — USB dongle on RPi5, joy + teleop_twist_joy packages)
+- [ ] Fix camera feed (web_video_server not streaming — may need video encoding tweaks for Logitech webcam)

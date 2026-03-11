@@ -269,30 +269,41 @@ function sendNavGoal(canvasX, canvasY) {
   goalHandle = goalActionClient.sendGoal(
     goal,
     (result) => {
+      goalHandle = null;
       toast('Goal reached!', 'ok');
-      setNavGoalMode(false);
+      updateGoalUI();
     },
-    null,
     (feedback) => { /* could show progress */ },
   );
 
   toast(`Nav goal: (${wx.toFixed(2)}, ${wy.toFixed(2)})`, 'ok');
-  setNavGoalMode(false);
+  // Exit goal-picking mode but show cancel button (goal is now active)
+  navGoalMode = false;
+  updateGoalUI();
 }
 
 function cancelGoal() {
   if (goalHandle) { try { goalHandle.cancel(); } catch(_) {} goalHandle = null; }
-  setNavGoalMode(false);
   toast('Goal cancelled');
+  // Return to goal-picking mode if in a nav-capable mode
+  navGoalMode = true;
+  updateGoalUI();
 }
 
 function setNavGoalMode(on) {
   navGoalMode = on;
   if (on && !goalActionClient) setupGoalClient();
+  updateGoalUI();
+}
+
+/** Update hint and cancel button visibility based on current state. */
+function updateGoalUI() {
   const hint = document.getElementById('nav-goal-hint');
   const btn  = document.getElementById('cancel-goal-btn');
-  if (hint) hint.classList.toggle('hidden', !on);
-  if (btn)  btn.classList.toggle('hidden', !on);
+  // Show hint when in goal-picking mode and no active goal
+  if (hint) hint.classList.toggle('hidden', !navGoalMode || goalHandle);
+  // Show cancel button when a goal is active
+  if (btn)  btn.classList.toggle('hidden', !goalHandle);
 }
 
 function setEl(id, val) {

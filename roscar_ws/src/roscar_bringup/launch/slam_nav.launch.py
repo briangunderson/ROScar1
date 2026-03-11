@@ -37,8 +37,10 @@ def generate_launch_description():
     )
 
     # -- Nav2 bringup with SLAM mode (slam_toolbox + Nav2 stack) --
+    # NOTE: slam_toolbox params are in nav2_params.yaml (under slam_toolbox:
+    # namespace), not in the separate slam_toolbox.yaml. nav2_bringup's
+    # slam_launch.py reads them from the main params_file.
     nav2_params = os.path.join(bringup_dir, 'config', 'nav2_params.yaml')
-    slam_config = os.path.join(bringup_dir, 'config', 'slam_toolbox.yaml')
     nav2_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(nav2_bringup_dir, 'launch', 'bringup_launch.py')

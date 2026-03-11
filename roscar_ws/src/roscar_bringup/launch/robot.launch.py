@@ -24,6 +24,10 @@ def generate_launch_description():
         'use_lidar', default_value='true',
         description='Launch the RPLIDAR C1 node',
     )
+    use_camera_arg = DeclareLaunchArgument(
+        'use_camera', default_value='true',
+        description='Launch the webcam (v4l2_camera) node',
+    )
 
     # -- URDF (robot_state_publisher + joint_state_publisher) --
     description_launch = IncludeLaunchDescription(
@@ -60,6 +64,14 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('use_lidar')),
     )
 
+    # -- Webcam (v4l2_camera) --
+    camera_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(bringup_dir, 'launch', 'camera.launch.py')
+        ),
+        condition=IfCondition(LaunchConfiguration('use_camera')),
+    )
+
     # -- IMU filter (Madgwick) --
     imu_filter_config = os.path.join(bringup_dir, 'config', 'imu_filter.yaml')
     imu_filter_node = Node(
@@ -83,9 +95,11 @@ def generate_launch_description():
     return LaunchDescription([
         publish_odom_tf_arg,
         use_lidar_arg,
+        use_camera_arg,
         description_launch,
         driver_launch,
         lidar_node,
+        camera_launch,
         imu_filter_node,
         ekf_node,
     ])

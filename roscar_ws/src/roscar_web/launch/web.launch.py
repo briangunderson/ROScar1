@@ -33,6 +33,15 @@ def generate_launch_description():
         output='screen',
     )
 
+    # rosapi: provides /rosapi/* services (list nodes, topics, params, etc.)
+    # Required by roslibjs ros.getNodes() used in the STATUS tab
+    rosapi = Node(
+        package='rosapi',
+        executable='rosapi_node',
+        name='rosapi',
+        output='screen',
+    )
+
     # web_video_server: serves MJPEG streams from ROS2 Image topics over HTTP
     web_video = Node(
         package='web_video_server',
@@ -61,6 +70,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         rosbridge,
+        rosapi,
         web_video,
         launch_manager,
         http_server,
