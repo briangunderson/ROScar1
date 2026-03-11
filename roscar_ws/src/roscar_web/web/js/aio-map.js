@@ -15,7 +15,9 @@ let getRos;
 let mapSub   = null;
 let poseSub  = null;
 let tfClient = null;
-let hasTFPose = false;  // true when TFClient is providing map-frame poses
+let hasTFPose = false;  // true when TFClient is actively providing map-frame poses
+let lastTFTime = 0;     // timestamp of last TF update (for staleness detection)
+const TF_STALE_MS = 3000; // fall back to odom if TF hasn't updated in 3s
 let mapData  = null;    // {width, height, resolution, origin, data[]}
 let robotPos = null;    // {x, y, yaw}
 
@@ -53,6 +55,7 @@ export function clearMap() {
   mapData = null;
   robotPos = null;
   hasTFPose = false;
+  lastTFTime = 0;
   needsDraw = true;
 }
 
@@ -95,6 +98,11 @@ function subscribePose() {
     throttle_rate: 200,
   });
   poseSub.subscribe((msg) => {
+    // Check TF staleness: if TF hasn't updated recently, fall back to odom
+    if (hasTFPose && (Date.now() - lastTFTime) > TF_STALE_MS) {
+      hasTFPose = false;
+      console.warn('[aio-map] TF pose stale, falling back to odometry');
+    }
     // Only use odom as fallback when TFClient isn't providing map-frame poses
     if (hasTFPose) return;
     const q = msg.pose.pose.orientation;
@@ -118,11 +126,18 @@ function subscribeTF() {
     rate: 10.0,
   });
   tfClient.subscribe('base_footprint', (tf) => {
+    // Sanity check: reject clearly invalid transforms
+    const tx = tf.translation.x, ty = tf.translation.y;
+    if (!isFinite(tx) || !isFinite(ty) || Math.abs(tx) > 1000 || Math.abs(ty) > 1000) {
+      console.warn('[aio-map] TF gave suspicious pose:', tx, ty, '— ignoring');
+      return;
+    }
     hasTFPose = true;
+    lastTFTime = Date.now();
     const q = tf.rotation;
     robotPos = {
-      x: tf.translation.x,
-      y: tf.translation.y,
+      x: tx,
+      y: ty,
       yaw: Math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z)),
     };
     needsDraw = true;
@@ -284,6 +299,12 @@ function drawRobotPose(ctx) {
 
   const mpx = (robotPos.x - ox) / res;
   const mpy = (robotPos.y - oy) / res;
+
+  // Skip drawing if robot is wildly outside the map grid (bad TF or odom data)
+  const margin = 50; // pixels of grace beyond map edges
+  if (mpx < -margin || mpx > w + margin || mpy < -margin || mpy > h + margin) {
+    return;
+  }
 
   const sx = viewOffset.x + (h - mpy) * viewScale;
   const sy = viewOffset.y + (w - mpx) * viewScale;
