@@ -5,8 +5,8 @@
 
 import { HOST, PORTS, onAppEvent, toast } from './aio-app.js';
 
-let quality    = 50;
-let resolution = '640x480';
+let quality    = 20;
+let resolution = '320x240';
 let streaming  = false;
 
 const TOPIC = '/image_raw';
@@ -66,7 +66,7 @@ function setupControls() {
       document.querySelectorAll(`${PANEL} [data-quality]`).forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       quality = parseInt(btn.dataset.quality, 10);
-      if (streaming) startStream();
+      startStream();
     });
   });
 
@@ -76,7 +76,7 @@ function setupControls() {
       document.querySelectorAll(`${PANEL} [data-res]`).forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       resolution = btn.dataset.res;
-      if (streaming) startStream();
+      startStream();
     });
   });
 }

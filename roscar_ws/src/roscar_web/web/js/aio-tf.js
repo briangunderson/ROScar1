@@ -11,6 +11,7 @@ let lastStructureKey = '';   // serialised structure for change detection
 let stalenessTimer = null;
 let getRos = null;
 const subs = [];
+let resizeObs = null;
 
 // ── Subscriptions ────────────────────────────────────────────────────────────
 function subscribe() {
@@ -97,6 +98,10 @@ function rebuildTree() {
 
   container.innerHTML = '';
 
+  // Create inner wrapper for scaling
+  const inner = document.createElement('div');
+  inner.className = 'tf-tree-inner';
+
   // Find root nodes: frames whose parent is null or whose parent is not itself a child
   const roots = [];
   for (const [name, info] of frames) {
@@ -128,8 +133,13 @@ function rebuildTree() {
 
   roots.sort();
   for (const root of roots) {
-    container.appendChild(renderBranch(root));
+    inner.appendChild(renderBranch(root));
   }
+
+  container.appendChild(inner);
+
+  // Fit content to container after layout
+  requestAnimationFrame(() => fitTFTree());
 }
 
 function buildStructureKey() {
@@ -223,10 +233,38 @@ function applyActivityClass(el, info) {
   }
 }
 
+// ── Scale tree to fit container ──────────────────────────────────────────────
+function fitTFTree() {
+  const container = document.getElementById('tf-tree');
+  if (!container) return;
+  const inner = container.querySelector('.tf-tree-inner');
+  if (!inner) return;
+
+  // Reset scale to measure natural size
+  inner.style.transform = 'none';
+
+  const cw = container.clientWidth;
+  const ch = container.clientHeight;
+  const iw = inner.scrollWidth;
+  const ih = inner.scrollHeight;
+
+  if (iw === 0 || ih === 0 || cw === 0 || ch === 0) return;
+
+  const scale = Math.min(1, cw / iw, ch / ih);
+  inner.style.transform = `scale(${scale})`;
+}
+
 // ── Init ─────────────────────────────────────────────────────────────────────
 export function initTF(getRosFn) {
   getRos = getRosFn;
   onAppEvent((ev) => {
     if (ev === 'connected') subscribe();
   });
+
+  // Re-fit the tree whenever the container resizes
+  const container = document.getElementById('tf-tree');
+  if (container && typeof ResizeObserver !== 'undefined') {
+    resizeObs = new ResizeObserver(() => fitTFTree());
+    resizeObs.observe(container);
+  }
 }
