@@ -30,8 +30,9 @@ ekf_filter_node:
     # --- IMU (raw, angular velocity only) ---
     # Use imu/data_raw directly — bypasses Madgwick whose orientation is
     # broken (negating gz fixes angular_velocity sign but inverts the
-    # Madgwick quaternion).  The driver sets identity orientation on
-    # imu/data_raw so robot_localization's frame transform is a no-op.
+    # Madgwick quaternion).  The driver publishes orientation_covariance[0]=-1
+    # (ROS convention: "no orientation data") and linear_acceleration_covariance[0]=-1
+    # so robot_localization skips all orientation/accel internal processing.
     imu0: "imu/data_raw"
     imu0_config: [false, false, false,   # x, y, z
                   false, false, false,   # roll, pitch, yaw
@@ -40,7 +41,7 @@ ekf_filter_node:
                   false, false, false]   # ax, ay, az
     imu0_differential: false
     imu0_relative: false
-    imu0_remove_gravitational_acceleration: true
+    imu0_remove_gravitational_acceleration: false  # not fusing accel; avoids gravity code path bugs
 
     use_control: false
 
