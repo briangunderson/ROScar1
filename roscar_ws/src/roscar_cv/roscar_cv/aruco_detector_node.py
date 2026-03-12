@@ -108,12 +108,25 @@ class ArucoDetectorNode(Node):
 
             # Pose estimation (requires camera intrinsics)
             if self.camera_matrix is not None:
-                rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
-                    corners, self.marker_size, self.camera_matrix, self.dist_coeffs
-                )
+                # Build 3D object points for a single marker
+                half = self.marker_size / 2.0
+                obj_pts = np.array([
+                    [-half,  half, 0],
+                    [ half,  half, 0],
+                    [ half, -half, 0],
+                    [-half, -half, 0],
+                ], dtype=np.float32)
+
                 for i, marker_id in enumerate(ids.flatten()):
-                    rvec = rvecs[i][0]
-                    tvec = tvecs[i][0]
+                    # solvePnP per marker (replaces removed estimatePoseSingleMarkers)
+                    ok, rvec, tvec = cv2.solvePnP(
+                        obj_pts, corners[i].reshape(-1, 2),
+                        self.camera_matrix, self.dist_coeffs
+                    )
+                    if not ok:
+                        continue
+                    rvec = rvec.flatten()
+                    tvec = tvec.flatten()
 
                     # Draw axis on debug image
                     cv2.drawFrameAxes(

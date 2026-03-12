@@ -119,6 +119,15 @@
 - `git pull` updates `~/ROScar1/` but NOT `~/roscar_ws/src/roscar_web/`
 - Must manually `cp` changed files from `~/ROScar1/...` to `~/roscar_ws/src/...` after pull
 - `chmod +x` on scripts causes local git changes — use `git checkout --` before pull
+- **CRITICAL: `http_server_node.py` serves static files from `get_package_share_directory('roscar_web')` which resolves to the INSTALL directory** (`~/roscar_ws/install/roscar_web/share/roscar_web/web/`), NOT the source directory
+- `--symlink-install` symlinks Python files but **COPIES data_files** (the `web/` static directory declared in setup.py) to install/
+- This means `git pull` + `systemctl restart` alone does NOT update the served web files — you MUST also run `colcon build`
+- **Full deploy sequence for web changes**:
+  1. `cd ~/ROScar1 && git pull`
+  2. `cp -r ~/ROScar1/roscar_ws/src/roscar_web/web/ ~/roscar_ws/src/roscar_web/`
+  3. `cd ~/roscar_ws && source /opt/ros/jazzy/setup.bash && colcon build --symlink-install --packages-select roscar_web`
+  4. `sudo systemctl restart roscar-web`
+- Without step 2+3, the install/ directory has stale HTML/CSS/JS and changes are invisible even after hard refresh
 
 ## systemd for ROS2
 - ROS2 `setup.bash` uses unbound variables (e.g., `AMENT_TRACE_SETUP_FILES`) — don't use `set -u` in launcher scripts
@@ -204,3 +213,11 @@
 - CH340 (1a86:7523) → /dev/roscar_board (motor board)
 - CP210x (10c4:ea60) → /dev/rplidar (RPLIDAR C1)
 - Both symlinks confirmed working on first boot after setup_rpi.sh
+
+## Computer Vision (roscar_cv)
+- **OpenCV 4.8+ removed `cv2.aruco.estimatePoseSingleMarkers()`** — use `cv2.solvePnP()` per marker with explicit 3D object points instead
+- **ROS2 cannot declare a parameter with empty list `[]`** — type cannot be inferred. Use `rclpy.Parameter.Type.INTEGER_ARRAY` for untyped list params, and catch `ParameterUninitializedException` on `get_parameter()`
+- **NumPy version conflict**: ultralytics/torch install NumPy 2.x which is incompatible with ROS2 cv_bridge (compiled against NumPy 1.x). Fix: `pip install 'numpy<2'` and `pip install 'opencv-contrib-python<4.10'`
+- **Pi has TWO workspaces**: `~/ROScar1/roscar_ws/` (git repo) and `~/roscar_ws/` (service workspace). The systemd service sources `~/roscar_ws/install/setup.bash`. Fix: symlink package source dirs from git repo into service workspace
+- **CycloneDDS eth0 vs eth1**: Docker Desktop in WSL2 can shift the LAN interface from eth0 to eth1. Always check `ip -4 addr show` and update cyclonedds.xml `<NetworkInterface>` accordingly
+- **colcon --symlink-install and new files**: New data_files (e.g. new JS files added to web/) require a CLEAN rebuild (`rm -rf build/<pkg> install/<pkg>`) — incremental builds don't detect new files in data_files globs

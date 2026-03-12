@@ -19,14 +19,17 @@ class YoloDetectorNode(Node):
         self.declare_parameter('confidence_threshold', 0.5)
         self.declare_parameter('device', '0')
         self.declare_parameter('detection_rate', 15.0)
-        self.declare_parameter('classes', [])
+        self.declare_parameter('classes', rclpy.Parameter.Type.INTEGER_ARRAY)
         self.declare_parameter('annotate_image', True)
 
         model_path = self.get_parameter('model').value
         self.conf_threshold = self.get_parameter('confidence_threshold').value
         device = self.get_parameter('device').value
         self.detection_rate = self.get_parameter('detection_rate').value
-        self.filter_classes = self.get_parameter('classes').value
+        try:
+            self.filter_classes = self.get_parameter('classes').value or []
+        except rclpy.exceptions.ParameterUninitializedException:
+            self.filter_classes = []
         self.annotate = self.get_parameter('annotate_image').value
 
         # Rate limiting

@@ -4,5 +4,5 @@ yolo_detector:
     confidence_threshold: 0.5
     device: "0"
     detection_rate: 15.0
-    classes: []
+    # classes: [0, 1, 2]  # empty = all classes; list COCO IDs to filter
     annotate_image: true
