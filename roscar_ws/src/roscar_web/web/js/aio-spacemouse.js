@@ -157,9 +157,9 @@ export function getSpaceMouseVelocity() {
   const vyR = processAxis(raw.cx,  deadzoneCount) * -sm_max_linear;   // right push → -vy (ROS left-positive)
   const wzR = processAxis(raw.crz, deadzoneCount) * -sm_max_angular;  // CW twist → -wz (ROS CCW-positive)
 
-  // Apply inversion toggles
-  const vxOut  = settings.sm_invert_y  ? -vx  : vx;
-  const vyOut  = settings.sm_invert_x  ? -vyR : vyR;
+  // Apply inversion toggles (sm_invert_x = fwd/back = vx, sm_invert_y = strafe = vy)
+  const vxOut  = settings.sm_invert_x  ? -vx  : vx;
+  const vyOut  = settings.sm_invert_y  ? -vyR : vyR;
   const wzOut  = settings.sm_invert_rz ? -wzR : wzR;
 
   // Return null if everything is zero after processing
@@ -336,11 +336,6 @@ function setupSettingsUI() {
   _bindCheckbox('sm-invert-y',  'sm_invert_y');
   _bindCheckbox('sm-invert-rz', 'sm_invert_rz');
 
-  // ── Connect button ────────────────────────────────────────────────────
-  const connectBtn = document.getElementById('sm-connect-btn');
-  if (connectBtn) {
-    connectBtn.addEventListener('click', () => requestSpaceMouse());
-  }
 }
 
 /**
@@ -381,7 +376,7 @@ function _bindCheckbox(id, key) {
  * Show or hide the SpaceMouse settings panel.
  */
 function _showSettingsPanel(visible) {
-  const panel = document.getElementById('sm-settings-panel');
+  const panel = document.getElementById('sm-settings');
   if (!panel) return;
   panel.style.display = visible ? '' : 'none';
 }
