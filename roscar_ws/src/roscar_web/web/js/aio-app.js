@@ -79,15 +79,15 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-  // SpaceMouse connect button
-  const smBtn = document.getElementById('sm-connect-btn');
-  if (smBtn) {
-    smBtn.addEventListener('click', async () => {
-      if (!isSpaceMouseConnected()) {
-        await requestSpaceMouse();
-      }
-    });
-  }
+// SpaceMouse connect button
+const smBtn = document.getElementById('sm-connect-btn');
+if (smBtn) {
+  smBtn.addEventListener('click', async () => {
+    if (!isSpaceMouseConnected()) {
+      await requestSpaceMouse();
+    }
+  });
+}
 
 // ── ROS Connection ───────────────────────────────────────────────────────
 function connect() {
@@ -131,13 +131,15 @@ onNavModeChange(enableNavGoalMode);
 initGraphs();
 initDiagnostics(getRos);
 initTF(getRos);
-    initSpaceMouse({
-      estop,
-      onConnectionChange: (connected) => {
-        const btn = document.getElementById('sm-connect-btn');
-        if (btn) btn.textContent = connected ? 'SM: Connected' : 'Connect SpaceMouse';
-        if (btn) btn.classList.toggle('active', connected);
-      },
-    });
+initSpaceMouse({
+  estop,
+  onConnectionChange: (smConnected, deviceName) => {
+    const btn = document.getElementById('sm-connect-btn');
+    if (btn) {
+      btn.textContent = smConnected ? `SM: ${deviceName || 'Connected'}` : 'Connect SpaceMouse';
+      btn.classList.toggle('active', smConnected);
+    }
+  },
+});
 
 connect();

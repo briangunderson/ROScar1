@@ -65,6 +65,9 @@ let settings = { ...SETTINGS_DEFAULTS };
 let _estop            = null;
 let _onConnectionChange = null;
 
+/** Button state for rising-edge E-STOP detection */
+let _buttonsWerePressed = false;
+
 // ── Public API ───────────────────────────────────────────────────────────
 
 /**
@@ -192,6 +195,7 @@ function _handleDisconnect() {
   }
   raw.cx = 0; raw.cy = 0; raw.crz = 0;
   lastReportAt = 0;
+  _buttonsWerePressed = false;
   _showSettingsPanel(false);
   if (_onConnectionChange) _onConnectionChange(false, null);
 }
@@ -216,14 +220,15 @@ function _handleInputReport(event) {
       raw.crz = data.getInt16(4, true); // Rz
     }
   } else if (reportId === REPORT_BUTTONS) {
-    // Any non-zero byte = button press → E-STOP
+    // Detect rising edge: fire E-STOP only on 0→non-zero transition
     let anyPressed = false;
     for (let i = 0; i < data.byteLength; i++) {
       if (data.getUint8(i) !== 0) { anyPressed = true; break; }
     }
-    if (anyPressed && _estop) {
+    if (anyPressed && !_buttonsWerePressed && _estop) {
       _estop();
     }
+    _buttonsWerePressed = anyPressed;
   }
 }
 
@@ -239,13 +244,15 @@ function _handleInputReport(event) {
  */
 function processAxis(rawCount, deadzone) {
   // 1. Apply deadzone
-  if (Math.abs(rawCount) <= deadzone) return 0;
+  const abs = Math.abs(rawCount);
+  if (abs <= deadzone) return 0;
 
-  // 2. Normalize to [-1, +1]
-  const norm = Math.max(-1, Math.min(1, rawCount / AXIS_MAX));
+  // 2. Rescale post-deadzone range [deadzone, AXIS_MAX] to [0, 1], then normalize to [-1, +1]
+  const sign = rawCount < 0 ? -1 : 1;
+  const norm = Math.min(1, (abs - deadzone) / (AXIS_MAX - deadzone));
 
   // 3. Apply sensitivity curve
-  return applyCurve(norm);
+  return applyCurve(sign * norm);
 }
 
 /**
@@ -328,8 +335,8 @@ function setupSettingsUI() {
   // ── Sliders ──────────────────────────────────────────────────────────
   _bindSlider('sm-exponent',    'sm_exponent',    2,  v => v.toFixed(1));
   _bindSlider('sm-deadzone',    'sm_deadzone',    0,  v => String(Math.round(v)));
-  _bindSlider('sm-max-linear',  'sm_max_linear',  2,  v => v.toFixed(2));
-  _bindSlider('sm-max-angular', 'sm_max_angular', 1,  v => v.toFixed(1));
+  _bindSlider('sm-max-linear',  'sm_max_linear',  2,  v => v.toFixed(2) + ' m/s');
+  _bindSlider('sm-max-angular', 'sm_max_angular', 1,  v => v.toFixed(1) + ' rad/s');
 
   // ── Inversion checkboxes ─────────────────────────────────────────────
   _bindCheckbox('sm-invert-x',  'sm_invert_x');

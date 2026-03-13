@@ -14,7 +14,8 @@ let maxLinear  = 0.3;
 let maxAngular = 1.0;
 
 // Per-source velocity state
-const joy = { vx: 0, vy: 0, wz: 0 };
+const joyL = { vx: 0, vy: 0 };           // left joystick: translate
+const joyR = { vx: 0, wz: 0 };           // right joystick: drive + rotate
 const keys = { vx: 0, vy: 0, wz: 0 };
 const pad = { vx: 0, vy: 0, wz: 0 };
 
@@ -68,21 +69,21 @@ function setupJoysticks() {
     const angle = data.angle.radian;
     const force = Math.min(data.force, 1.0);
     // nipplejs: angle 0=right, pi/2=up. ROS: vx=forward, vy=left
-    joy.vx =  force * Math.sin(angle) * maxLinear;
-    joy.vy = -force * Math.cos(angle) * maxLinear;
+    joyL.vx =  force * Math.sin(angle) * maxLinear;
+    joyL.vy = -force * Math.cos(angle) * maxLinear;
   });
-  joyT.on('end', () => { joy.vx = 0; joy.vy = 0; });
+  joyT.on('end', () => { joyL.vx = 0; joyL.vy = 0; });
 
   // Right joystick: rotate + drive (wz from X-axis, vx from Y-axis)
-  const joyR = nipplejs.create(opts(document.getElementById('joy-rotate')));
-  joyR.on('move', (_, data) => {
+  const joyRStick = nipplejs.create(opts(document.getElementById('joy-rotate')));
+  joyRStick.on('move', (_, data) => {
     if (!data.vector) return;
     const angle = data.angle.radian;
     const force = Math.min(data.force, 1.0);
-    joy.wz = -force * Math.cos(angle) * maxAngular;
-    joy.vx = force * Math.sin(angle) * maxLinear;
+    joyR.wz = -force * Math.cos(angle) * maxAngular;
+    joyR.vx =  force * Math.sin(angle) * maxLinear;
   });
-  joyR.on('end', () => { joy.wz = 0; joy.vx = 0; });
+  joyRStick.on('end', () => { joyR.wz = 0; joyR.vx = 0; });
 }
 
 // ── Keyboard ─────────────────────────────────────────────────────────────
@@ -175,7 +176,7 @@ function publishVelocity() {
   // Priority: SpaceMouse > Gamepad > Joystick > Keyboard
   const smVel = getSpaceMouseVelocity();
   const padActive = pad.vx !== 0 || pad.vy !== 0 || pad.wz !== 0;
-  const joyActive = joy.vx !== 0 || joy.vy !== 0 || joy.wz !== 0;
+  const joyActive = joyL.vx !== 0 || joyL.vy !== 0 || joyR.vx !== 0 || joyR.wz !== 0;
   const kbActive  = keys.vx !== 0 || keys.vy !== 0 || keys.wz !== 0;
 
   if (smVel) {
@@ -185,7 +186,8 @@ function publishVelocity() {
     vx = pad.vx; vy = pad.vy; wz = pad.wz;
     setSource('PAD');
   } else if (joyActive) {
-    vx = joy.vx; vy = joy.vy; wz = joy.wz;
+    // Combine left (translate) + right (drive+rotate) joystick contributions
+    vx = joyL.vx + joyR.vx; vy = joyL.vy; wz = joyR.wz;
     setSource('JOY');
   } else if (kbActive) {
     vx = keys.vx * maxLinear; vy = keys.vy * maxLinear; wz = keys.wz * maxAngular;

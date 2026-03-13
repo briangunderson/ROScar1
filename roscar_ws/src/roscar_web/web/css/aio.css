@@ -589,12 +589,6 @@ input[type=range]::-moz-range-thumb {
   color: var(--primary);
   cursor: default;
 }
-.sm-tag {
-  color: var(--primary);
-  font: 10px/1 var(--mono);
-  margin-left: 4px;
-}
-
 .sm-settings {
   padding: 0 8px 4px;
 }
