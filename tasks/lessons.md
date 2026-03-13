@@ -221,3 +221,15 @@
 - **Pi has TWO workspaces**: `~/ROScar1/roscar_ws/` (git repo) and `~/roscar_ws/` (service workspace). The systemd service sources `~/roscar_ws/install/setup.bash`. Fix: symlink package source dirs from git repo into service workspace
 - **CycloneDDS eth0 vs eth1**: Docker Desktop in WSL2 can shift the LAN interface from eth0 to eth1. Always check `ip -4 addr show` and update cyclonedds.xml `<NetworkInterface>` accordingly
 - **colcon --symlink-install and new files**: New data_files (e.g. new JS files added to web/) require a CLEAN rebuild (`rm -rf build/<pkg> install/<pkg>`) — incremental builds don't detect new files in data_files globs
+- **vision_msgs Jazzy API change**: `ObjectHypothesisWithPose` wraps `ObjectHypothesis` with fields `hypothesis.class_id` (string) and `hypothesis.score` — NOT direct `hyp.id` and `hyp.score`. The old API causes `AttributeError` crash.
+- **v4l2_camera device contention**: Multiple camera launches leave orphan v4l2_camera processes holding `/dev/video0`. New launches fail with "Failed mapping device memory". Fix: `lsof /dev/video0` to find competing PIDs, kill them before relaunching.
+
+## CycloneDDS ExternalNetworkAddress (CRITICAL for WSL2)
+- **Root cause of WSL2→Pi data transport failure**: CycloneDDS in WSL2 discovers peers correctly (topic names visible) but advertises WRONG locator addresses in SPDP/SEDP messages for data transport
+- With `<NetworkInterface address="192.168.1.194" />` alone, CycloneDDS binds to the right interface but still advertises an internal/wrong address in its participant locators
+- The Pi can discover WSL2's topics (SPDP discovery works via configured peers) but cannot deliver data because it sends to the wrong locator address
+- **Symptom**: `ros2 topic list` shows cross-machine topics, but `ros2 topic hz` shows "does not appear to be published yet" — discovery ≠ data transport
+- **Fix**: Add `<ExternalNetworkAddress>192.168.1.194</ExternalNetworkAddress>` to WSL2's CycloneDDS config `<General>` section. This forces CycloneDDS to advertise the correct LAN IP as its data locator, overriding whatever it auto-detects inside WSL2's virtual network stack.
+- Also add `<ExternalNetworkAddress>` on the Pi side for symmetry (especially if Pi has multiple interfaces in the future)
+- **Rule**: ANY CycloneDDS deployment behind NAT, virtual networking, or container boundaries NEEDS `ExternalNetworkAddress` — interface binding alone is insufficient
+- Raw UDP tests passing between machines does NOT prove DDS will work — DDS uses locators from the protocol, not just the transport layer

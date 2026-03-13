@@ -377,9 +377,11 @@ CycloneDDS unicast peer discovery bridges the Pi <-> WSL2 network.
 ### CycloneDDS Config
 Both Pi (`~/cyclonedds.xml`) and WSL2 (`~/cyclonedds.xml`) use unicast peer discovery:
 - Pi peers: `localhost` + WSL2's LAN IP (e.g., 192.168.1.194)
-- WSL2 peers: `localhost` + Pi IP (192.168.1.170)
+- WSL2 peers: Pi IP (192.168.1.170)
 - `AllowMulticast=false` (multicast doesn't reliably cross WSL2 boundary)
-- **CRITICAL**: WSL2 config MUST include `<Interfaces><NetworkInterface name="eth0" /></Interfaces>` (or whichever interface has the LAN IP — check with `ip -4 addr show`). Docker Desktop creates bridge networks that CycloneDDS may bind to instead, causing discovery to silently fail. Interface name can shift between `eth0`/`eth1` after Windows/WSL updates.
+- **CRITICAL**: Both configs MUST include `<ExternalNetworkAddress>` set to the machine's LAN IP. Without this, CycloneDDS in WSL2 advertises wrong locator addresses — topic discovery works (names visible) but NO data flows. This is the #1 cause of "topic does not appear to be published yet" across WSL2↔Pi.
+- **CRITICAL**: WSL2 config MUST include `<Interfaces><NetworkInterface address="192.168.1.194" /></Interfaces>` (bind by IP, not interface name). Docker Desktop creates bridge networks that CycloneDDS may bind to instead. Interface names shift between `eth0`/`eth1` unpredictably.
+- Pi config MUST include `<Interfaces><NetworkInterface address="192.168.1.170" /></Interfaces>` for explicit binding.
 
 ### CRITICAL: ros2 daemon
 The ros2 daemon caches DDS discovery. If started before CycloneDDS env vars are set, it uses FastDDS and cross-machine discovery fails. Kill daemon with `pkill -f ros2.*daemon` and use `--no-daemon` for testing. `ros2 daemon stop` can itself hang if the daemon is in a bad state.
