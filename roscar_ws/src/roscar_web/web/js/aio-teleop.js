@@ -3,10 +3,11 @@
  * Left joy: vx/vy (translate).  Right joy: wz (rotate).
  * Keyboard: W/A/S/D translate, Q/E rotate.
  * Gamepad: left stick translate, right stick rotate.
- * Priority: gamepad > joystick > keyboard.
+ * Priority: SpaceMouse > gamepad > joystick > keyboard.
  */
 
 import { isConnected } from './aio-app.js';
+import { getSpaceMouseVelocity } from './aio-spacemouse.js';
 
 // Speed limits (updated by sliders)
 let maxLinear  = 0.3;
@@ -169,26 +170,34 @@ function publishVelocity() {
   const pub = getPub();
   if (!pub) return;
 
-  let vx, vy, wz;
+  let vx = 0, vy = 0, wz = 0;
 
-  // Priority: gamepad > joystick > keyboard
+  // Priority: SpaceMouse > Gamepad > Joystick > Keyboard
+  const smVel = getSpaceMouseVelocity();
   const padActive = pad.vx !== 0 || pad.vy !== 0 || pad.wz !== 0;
   const joyActive = joy.vx !== 0 || joy.vy !== 0 || joy.wz !== 0;
+  const kbActive  = keys.vx !== 0 || keys.vy !== 0 || keys.wz !== 0;
 
-  if (padActive) {
+  if (smVel) {
+    vx = smVel.vx; vy = smVel.vy; wz = smVel.wz;
+    setSource('SM');
+  } else if (padActive) {
     vx = pad.vx; vy = pad.vy; wz = pad.wz;
     setSource('PAD');
   } else if (joyActive) {
     vx = joy.vx; vy = joy.vy; wz = joy.wz;
     setSource('JOY');
+  } else if (kbActive) {
+    vx = keys.vx * maxLinear; vy = keys.vy * maxLinear; wz = keys.wz * maxAngular;
+    setSource('KB');
   } else {
-    vx = keys.vx * maxLinear;
-    vy = keys.vy * maxLinear;
-    wz = keys.wz * maxAngular;
-    if (keys.vx !== 0 || keys.vy !== 0 || keys.wz !== 0) {
-      setSource('KB');
-    }
+    setSource('--');
   }
+
+  // Dim speed sliders when SpaceMouse is active source
+  document.querySelectorAll('.drive .slider-row').forEach(
+    row => row.classList.toggle('sm-dimmed', smVel !== null)
+  );
 
   pub.publish(new ROSLIB.Message({
     linear:  { x: vx, y: vy, z: 0 },
