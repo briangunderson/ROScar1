@@ -221,7 +221,7 @@ http://<robot-ip>:8888/
 ### Dashboard Tabs
 | Tab | Function |
 |-----|---------|
-| DRIVE | Dual virtual joystick (translate vx/vy + rotate wz), keyboard WASD+QE |
+| DRIVE | Dual virtual joystick (translate vx/vy + drive/rotate wz), keyboard WASD+QE, SpaceMouse, gamepad |
 | CAMERA | MJPEG live feed, quality/resolution selectors |
 | MAP | OccupancyGrid renderer, pan/zoom, click-to-navigate (Nav2 goal) |
 | STATUS | Position, velocity, orientation, battery gauge, active nodes |
@@ -253,14 +253,16 @@ roscar_ws/src/roscar_web/web/
     ├── map.js          # Original: OccupancyGrid + nav goals
     ├── modes.js        # Original: Mode switching + map save
     ├── aio-app.js      # AIO entry: ROS connection, E-STOP, module init
-    ├── aio-teleop.js   # AIO: dual joystick + WASD + gamepad
+    ├── aio-teleop.js   # AIO: dual joystick + WASD + gamepad + SpaceMouse priority
+    ├── aio-spacemouse.js   # AIO: WebHID SpaceMouse driver (connection, parsing, signal processing, settings)
     ├── aio-camera.js   # AIO: MJPEG always-on stream
     ├── aio-status.js   # AIO: status + mode switching combined
     ├── aio-lidar.js    # AIO: lidar mini-radar
     ├── aio-map.js      # AIO: OccupancyGrid + nav goals
     ├── aio-graphs.js   # AIO: rolling sparkline charts (vx/vy/wz/battery)
     ├── aio-diagnostics.js  # AIO: /rosout log viewer
-    └── aio-tf.js       # AIO: TF tree visualizer
+    ├── aio-tf.js       # AIO: TF tree visualizer
+    └── aio-cv.js       # AIO: CV feed toggle + detection overlay
 ```
 
 ### AIO Dashboard (aio.html)
@@ -273,10 +275,14 @@ Access at `http://<robot-ip>:8888/aio.html` — coexists with original tabbed UI
 | Drive (joysticks) | Graphs (sparklines) | Diagnostics |
 
 **Features beyond original UI**:
+- **SpaceMouse teleop**: Chrome WebHID driver for 3Dconnexion SpaceMouse Wireless — proportional 6DOF input with configurable deadzone, sensitivity curves (linear/expo/s-curve), axis inversion, and independent speed limits. See [SpaceMouse Teleop](#spacemouse-teleop-webhid) section below.
 - **Gamepad support**: Browser Gamepad API, standard mapping, 0.15 deadzone, priority over joystick/keyboard
+- **Input priority system**: SpaceMouse > Gamepad > Virtual Joystick > Keyboard. First active source wins each 10Hz publish cycle.
+- **Right joystick drive+rotate**: Right virtual joystick maps both axes (Y→vx forward/back, X→wz rotation) for single-thumb control
 - **Sparkline graphs**: Rolling 60s canvas charts for vx, vy, wz, battery with hover tooltips
 - **Diagnostics log viewer**: `/rosout` subscriber, severity filtering (ALL/INFO/WARN/ERR), 500-entry FIFO, auto-scroll
 - **TF tree visualizer**: `/tf` + `/tf_static` subscribers, HTML tree with staleness detection
+- **CV overlay**: Toggle between raw and annotated camera feed, shows detection counts from YOLO/ArUco
 
 **Module architecture**: Each `aio-*.js` is an ES module. `aio-app.js` is the entry point that creates the ROS connection, E-STOP handler, and initializes all modules. Data sharing uses callbacks (`onOdomData`, `onBatteryData`) to avoid duplicate subscriptions.
 
@@ -284,6 +290,51 @@ Access at `http://<robot-ip>:8888/aio.html` — coexists with original tabbed UI
 ```bash
 sudo apt install ros-jazzy-rosbridge-suite ros-jazzy-web-video-server
 ```
+
+### SpaceMouse Teleop (WebHID)
+
+Proportional 6DOF teleop using a 3Dconnexion SpaceMouse Wireless via Chrome's WebHID API. Bypasses the 3Dconnexion desktop driver entirely — reads raw HID reports for clean proportional control.
+
+**Supported devices**: Any 3Dconnexion SpaceMouse (vendor IDs `0x256F`, `0x046D`). Tested with SpaceMouse Wireless (cabled and via USB receiver).
+
+**Browser setup (one-time)**:
+WebHID requires a secure context. Since the dashboard is served over plain HTTP:
+1. Navigate to `chrome://flags/#unsafely-treat-insecure-origin-as-secure`
+2. Add `http://<robot-ip>:8888` (e.g., `http://192.168.1.170:8888`)
+3. Relaunch Chrome
+
+If WebHID is unavailable, the Connect button is hidden and a console warning is logged.
+
+**Connection flow**:
+1. Click "Connect SpaceMouse" in the DRIVE panel header
+2. Select device from Chrome's HID picker (one-time — Chrome remembers the pairing)
+3. On subsequent page loads, auto-reconnects without the picker
+
+**Axis mapping** (SpaceMouse → ROS cmd_vel):
+| SpaceMouse | Robot Motion | ROS Field |
+|------------|-------------|-----------|
+| Push forward/back (Trans Y) | Drive fwd/back | `linear.x` (vx) |
+| Push left/right (Trans X) | Strafe | `linear.y` (vy) |
+| Twist CW/CCW (Rot Rz) | Rotate | `angular.z` (wz) |
+
+**E-STOP**: Any SpaceMouse button press triggers the app-level E-STOP (zero twist + toast).
+
+**Settings** (collapsible panel, shown when connected, persisted in localStorage):
+
+| Parameter | Default | Range | Description |
+|-----------|---------|-------|-------------|
+| `sm_deadzone` | 5 | 0–50 | Raw count threshold (below = zero) |
+| `sm_curve` | exponential | linear/expo/s-curve | Sensitivity response curve |
+| `sm_exponent` | 2.0 | 1.0–3.0 | Curve exponent (higher = more fine control at low deflection) |
+| `sm_max_linear` | 0.3 m/s | 0.1–1.0 | Max linear velocity |
+| `sm_max_angular` | 1.0 rad/s | 0.1–3.0 | Max angular velocity |
+| `sm_invert_x/y/rz` | false | — | Axis inversion toggles |
+
+SpaceMouse has its own speed limits, independent of the dashboard speed sliders (sliders dim when SM is active).
+
+**Signal pipeline**: raw HID (±350 counts) → deadzone → normalize [-1,+1] → sensitivity curve → scale by max speed → output m/s and rad/s.
+
+**Staleness**: If no HID report for 200ms, velocity returns null (puck released or device sleeping). Sleep indicator shown after 5s of inactivity.
 
 ## Build & Run
 
