@@ -118,10 +118,11 @@ class YoloDetectorNode(Node):
                 det.bbox.size_y = float(y2 - y1)
 
                 # Hypothesis (class + confidence)
-                # vision_msgs v4 (Jazzy): fields are hyp.id and hyp.score directly
+                # vision_msgs Jazzy: ObjectHypothesisWithPose wraps ObjectHypothesis
+                # with fields hypothesis.class_id (string) and hypothesis.score
                 hyp = ObjectHypothesisWithPose()
-                hyp.id = str(int(box.cls[0].item()))
-                hyp.score = float(box.conf[0].item())
+                hyp.hypothesis.class_id = str(int(box.cls[0].item()))
+                hyp.hypothesis.score = float(box.conf[0].item())
                 det.results.append(hyp)
 
                 # Add class name as id for convenience
