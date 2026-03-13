@@ -72,15 +72,16 @@ function setupJoysticks() {
   });
   joyT.on('end', () => { joy.vx = 0; joy.vy = 0; });
 
-  // Right joystick: rotate (wz, horizontal axis only)
+  // Right joystick: rotate + drive (wz from X-axis, vx from Y-axis)
   const joyR = nipplejs.create(opts(document.getElementById('joy-rotate')));
   joyR.on('move', (_, data) => {
     if (!data.vector) return;
     const angle = data.angle.radian;
     const force = Math.min(data.force, 1.0);
     joy.wz = -force * Math.cos(angle) * maxAngular;
+    joy.vx = force * Math.sin(angle) * maxLinear;
   });
-  joyR.on('end', () => { joy.wz = 0; });
+  joyR.on('end', () => { joy.wz = 0; joy.vx = 0; });
 }
 
 // ── Keyboard ─────────────────────────────────────────────────────────────
