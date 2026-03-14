@@ -52,6 +52,7 @@
       <div class="panel-body">
         <div class="camera-frame">
           <img id="camera-img" alt="Camera feed offline" draggable="false">
+          <canvas id="lidar-cam-canvas" class="lidar-cam-canvas"></canvas>
           <div id="camera-overlay" class="camera-overlay">
             <span>CAMERA OFFLINE</span>
           </div>
@@ -67,6 +68,9 @@
             <span class="ctrl-label">RES</span>
             <button class="sm-btn active" data-res="320x240">320</button>
             <button class="sm-btn" data-res="640x480">640</button>
+          </div>
+          <div class="ctrl-group">
+            <button class="sm-btn" id="lidar-cam-toggle" title="Lidar depth overlay">DEPTH</button>
           </div>
         </div>
       </div>
