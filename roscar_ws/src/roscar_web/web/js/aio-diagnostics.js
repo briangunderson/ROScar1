@@ -60,12 +60,25 @@ function levelTag(level) {
 
 // ── Entry creation ──────────────────────────────────────────────────────────
 
+function entryText(entry) {
+  return `[${entry.time}] ${entry.name}: ${entry.msg}`;
+}
+
 function createEntryEl(entry) {
   const div = document.createElement('div');
   div.className = 'log-entry';
   div.dataset.level = levelTag(entry.level);
   div.style.color = LEVEL_COLOR[entry.level] || LEVEL_COLOR[LEVEL.DEBUG];
-  div.textContent = `[${entry.time}] ${entry.name}: ${entry.msg}`;
+  div.textContent = entryText(entry);
+
+  // click to copy single line
+  div.addEventListener('click', () => {
+    // if user selected text, don't override — let them copy selection normally
+    const sel = window.getSelection();
+    if (sel && sel.toString().length > 0) return;
+    copyToClipboard(div.textContent);
+    flashCopied(div);
+  });
 
   // apply current filter visibility
   const minLevel = FILTER_MIN[activeFilter] || LEVEL.DEBUG;
@@ -74,6 +87,48 @@ function createEntryEl(entry) {
   }
 
   return div;
+}
+
+// ── Clipboard helpers ──────────────────────────────────────────────────────
+
+function copyToClipboard(text) {
+  navigator.clipboard.writeText(text).catch(() => {
+    // fallback for non-HTTPS contexts
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;left:-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  });
+}
+
+function flashCopied(el) {
+  el.classList.add('copied');
+  setTimeout(() => el.classList.remove('copied'), 600);
+}
+
+function copyVisibleLogs() {
+  const minLevel = FILTER_MIN[activeFilter] || LEVEL.DEBUG;
+  const lines = entries
+    .filter(e => e.level >= minLevel)
+    .map(e => entryText(e));
+  if (lines.length === 0) return;
+  copyToClipboard(lines.join('\n'));
+
+  // flash the COPY button
+  const btn = document.getElementById('diag-copy-all');
+  if (btn) {
+    const orig = btn.textContent;
+    btn.textContent = 'COPIED';
+    setTimeout(() => { btn.textContent = orig; }, 800);
+  }
+}
+
+function clearLogs() {
+  entries.length = 0;
+  logContainer.innerHTML = '';
 }
 
 // ── Filtering ───────────────────────────────────────────────────────────────
@@ -174,6 +229,14 @@ export function initDiagnostics(getRosFn) {
       applyFilter(btn.dataset.severity);
     });
   });
+
+  // Copy all visible logs
+  const copyBtn = document.getElementById('diag-copy-all');
+  if (copyBtn) copyBtn.addEventListener('click', copyVisibleLogs);
+
+  // Clear logs
+  const clearBtn = document.getElementById('diag-clear');
+  if (clearBtn) clearBtn.addEventListener('click', clearLogs);
 
   // Track user scroll to pause/resume auto-scroll
   const scrollParent = logContainer.parentElement;

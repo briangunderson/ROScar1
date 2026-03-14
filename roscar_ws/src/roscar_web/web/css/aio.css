@@ -497,7 +497,16 @@ input[type=range]::-moz-range-thumb {
   color: var(--text-dim);
 }
 
-.log-entry { padding: 1px 0; border-bottom: 1px solid rgba(26,48,68,.3); }
+.log-entry {
+  padding: 2px 4px; border-bottom: 1px solid rgba(26,48,68,.3);
+  cursor: pointer; border-radius: 2px;
+  user-select: text;               /* allow text selection */
+}
+.log-entry:hover { background: rgba(0,194,255,.08); }
+.log-entry.copied {
+  background: rgba(0,194,255,.18);
+  transition: background .3s ease;
+}
 .log-entry.log-info { color: var(--text); }
 .log-entry.log-warn { color: var(--amber); }
 .log-entry.log-err  { color: var(--red); }
