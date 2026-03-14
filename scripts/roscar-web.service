@@ -8,8 +8,11 @@ Type=simple
 User=brian
 Environment=HOME=/home/brian
 ExecStart=/home/brian/ROScar1/scripts/roscar-web.sh
-Restart=on-failure
+Restart=always
 RestartSec=5
+# Don't restart-loop forever if something is fundamentally broken
+StartLimitIntervalSec=120
+StartLimitBurst=5
 
 # Give ROS2 nodes time to shut down gracefully
 TimeoutStopSec=15
