@@ -12,6 +12,7 @@ import { initMap, enableNavGoalMode, clearMap }  from './aio-map.js';
 import { initGraphs }       from './aio-graphs.js';
 import { initDiagnostics }  from './aio-diagnostics.js';
 import { initTF }           from './aio-tf.js';
+import { initSpaceMouse, requestSpaceMouse, isSpaceMouseConnected } from './aio-spacemouse.js';
 
 // ── Connection config ────────────────────────────────────────────────────
 export const HOST  = window.location.hostname || 'localhost';
@@ -78,6 +79,16 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// SpaceMouse connect button
+const smBtn = document.getElementById('sm-connect-btn');
+if (smBtn) {
+  smBtn.addEventListener('click', async () => {
+    if (!isSpaceMouseConnected()) {
+      await requestSpaceMouse();
+    }
+  });
+}
+
 // ── ROS Connection ───────────────────────────────────────────────────────
 function connect() {
   if (ros) { try { ros.close(); } catch (_) {} }
@@ -120,5 +131,15 @@ onNavModeChange(enableNavGoalMode);
 initGraphs();
 initDiagnostics(getRos);
 initTF(getRos);
+initSpaceMouse({
+  estop,
+  onConnectionChange: (smConnected, deviceName) => {
+    const btn = document.getElementById('sm-connect-btn');
+    if (btn) {
+      btn.textContent = smConnected ? `SM: ${deviceName || 'Connected'}` : 'Connect SpaceMouse';
+      btn.classList.toggle('active', smConnected);
+    }
+  },
+});
 
 connect();
