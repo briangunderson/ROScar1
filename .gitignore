@@ -24,3 +24,20 @@ Thumbs.db
 
 # OTA lock (local coordination, not committed)
 .ota-lock
+
+# Screenshots, camera captures, images that may contain PII
+.playwright-mcp/
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.webp
+
+# ML model weights (large binaries)
+*.pt
+*.onnx
+*.tflite
+
+# Local Claude settings (may contain user-specific config)
+.claude/settings.local.json

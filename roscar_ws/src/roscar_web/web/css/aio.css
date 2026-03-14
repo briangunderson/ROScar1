@@ -577,3 +577,96 @@ input[type=range]::-moz-range-thumb {
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--border2); }
 ::-webkit-scrollbar-thumb:hover { background: var(--primary-d); }
+
+/* ═══════════════════════════════════════════════════════
+   SPACEMOUSE
+   ═══════════════════════════════════════════════════════ */
+.sm-connect-btn {
+  margin-left: auto;
+  padding: 2px 8px;
+  font: 9px var(--mono);
+  background: var(--bg2);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all .15s;
+}
+.sm-connect-btn:hover { border-color: var(--primary); color: var(--primary); }
+.sm-connect-btn.active {
+  background: rgba(0, 212, 255, 0.1);
+  border-color: var(--primary);
+  color: var(--primary);
+  cursor: default;
+}
+.sm-settings {
+  padding: 0 8px 4px;
+}
+.sm-settings summary.sm-settings-title {
+  font: 9px var(--mono);
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 4px 0;
+  user-select: none;
+}
+.sm-settings summary.sm-settings-title:hover { color: var(--primary); }
+.sm-settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 0;
+}
+.sm-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: 9px var(--mono);
+}
+.sm-label {
+  min-width: 55px;
+  color: var(--text-dim);
+}
+.sm-val {
+  min-width: 28px;
+  text-align: right;
+  color: var(--primary);
+  font: 10px var(--mono);
+}
+.sm-row input[type="range"] { flex: 1; }
+.sm-curve-btns {
+  display: flex;
+  gap: 3px;
+}
+.sm-curve-btns .btn-sm {
+  padding: 1px 6px;
+  font: 8px var(--mono);
+  background: var(--bg2);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  cursor: pointer;
+}
+.sm-curve-btns .btn-sm:hover { border-color: var(--text); }
+.sm-curve-btns .btn-sm.active {
+  background: rgba(0, 212, 255, 0.15);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.sm-check {
+  font: 9px var(--mono);
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+}
+.sm-check input[type="checkbox"] {
+  accent-color: var(--primary);
+  width: 12px;
+  height: 12px;
+}
+
+/* Dim speed sliders when SpaceMouse is active source (still interactive) */
+.drive .slider-row.sm-dimmed {
+  opacity: 0.3;
+}

@@ -175,6 +175,7 @@
       <div class="panel-title">
         DRIVE
         <span id="input-source" class="panel-title-info mono">KB</span>
+        <button id="sm-connect-btn" class="sm-connect-btn">Connect SpaceMouse</button>
       </div>
       <div class="panel-body panel-body-drive">
         <div class="drive-col joy-col">
@@ -207,8 +208,50 @@
         </div>
         <div class="drive-col joy-col">
           <div class="joy-zone" id="joy-rotate"></div>
-          <div class="joy-label">ROTATE</div>
+          <div class="joy-label">DRIVE+ROTATE</div>
         </div>
+      </div>
+      <!-- SpaceMouse settings (hidden until connected) -->
+      <div id="sm-settings" class="sm-settings" style="display:none">
+        <details>
+          <summary class="sm-settings-title">SpaceMouse Settings</summary>
+          <div class="sm-settings-body">
+            <div class="sm-row">
+              <span class="sm-label">Curve</span>
+              <div class="sm-curve-btns">
+                <button data-curve="linear" class="btn-sm">Linear</button>
+                <button data-curve="exponential" class="btn-sm active">Expo</button>
+                <button data-curve="s-curve" class="btn-sm">S-Curve</button>
+              </div>
+            </div>
+            <div class="sm-row">
+              <span class="sm-label">Exponent</span>
+              <input type="range" id="sm-exponent" min="1" max="3" step="0.1" value="2.0">
+              <span id="sm-exponent-val" class="sm-val">2.0</span>
+            </div>
+            <div class="sm-row">
+              <span class="sm-label">Deadzone</span>
+              <input type="range" id="sm-deadzone" min="0" max="50" step="1" value="5">
+              <span id="sm-deadzone-val" class="sm-val">5</span>
+            </div>
+            <div class="sm-row">
+              <span class="sm-label">Linear</span>
+              <input type="range" id="sm-max-linear" min="0.1" max="1.0" step="0.05" value="0.3">
+              <span id="sm-max-linear-val" class="sm-val">0.3 m/s</span>
+            </div>
+            <div class="sm-row">
+              <span class="sm-label">Angular</span>
+              <input type="range" id="sm-max-angular" min="0.1" max="3.0" step="0.1" value="1.0">
+              <span id="sm-max-angular-val" class="sm-val">1.0 rad/s</span>
+            </div>
+            <div class="sm-row">
+              <span class="sm-label">Invert</span>
+              <label class="sm-check"><input type="checkbox" id="sm-invert-x"> Fwd/Back</label>
+              <label class="sm-check"><input type="checkbox" id="sm-invert-y"> Strafe</label>
+              <label class="sm-check"><input type="checkbox" id="sm-invert-rz"> Rotate</label>
+            </div>
+          </div>
+        </details>
       </div>
     </div>
 
