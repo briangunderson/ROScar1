@@ -49,6 +49,7 @@ Key: EKF owns odom->base_footprint TF (driver publish_odom_tf=false)
 | `roscar_ws/src/roscar_bringup/config/ekf.yaml` | EKF sensor fusion config |
 | `roscar_ws/src/roscar_bringup/config/laser_filter.yaml` | Laser range filter (drops chassis reflections < 0.15m) |
 | `roscar_ws/src/roscar_bringup/config/slam_toolbox.yaml` | slam_toolbox online_async config |
+| `roscar_ws/src/roscar_bringup/config/camera_calibration.yaml` | Logitech webcam intrinsics (046d:0825, plumb_bob) |
 | `roscar_ws/src/roscar_bringup/config/nav2_params.yaml` | Nav2 full stack config (DWB holonomic) |
 | `roscar_ws/src/roscar_bringup/launch/slam.launch.py` | SLAM mapping (teleop + slam_toolbox) |
 | `roscar_ws/src/roscar_bringup/launch/navigation.launch.py` | Nav2 on saved map |
@@ -477,9 +478,10 @@ The EKF uses `imu/data_raw` directly (bypassing Madgwick filter) for angular vel
 - [ ] Verify holonomic motion (strafing) during navigation
 - [ ] Tighten xy_goal_tolerance (currently 0.25m — robot declares success 25cm from target)
 - [ ] Tune yaw_trim parameter for straight driving
-- [ ] Camera calibration for undistorted images
+- [x] Camera calibration for undistorted images (plumb_bob, fx=924, fy=920, cx=357, cy=253)
 - [ ] Fine-tune EKF covariances under dynamic conditions
 - [ ] Update Nav2 robot footprint after measuring real dimensions
 - [ ] Tune Nav2 velocity/acceleration limits based on real-world testing
 - [ ] Implement wireless gamepad control (Logitech F710 — USB dongle on RPi5, joy + teleop_twist_joy packages)
-- [ ] Fix camera feed (web_video_server not streaming — may need video encoding tweaks for Logitech webcam)
+- [x] Fix camera feed (io_method=read fixes YUYV mmap failure; YUYV→RGB conversion works but slow)
+- [ ] Optimize camera: switch to MJPG pixel format for faster streaming (needs cv_bridge MJPG support)
