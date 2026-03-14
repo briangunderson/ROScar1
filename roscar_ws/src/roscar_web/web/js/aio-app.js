@@ -12,6 +12,7 @@ import { initMap, enableNavGoalMode, clearMap }  from './aio-map.js';
 import { initGraphs }       from './aio-graphs.js';
 import { initDiagnostics }  from './aio-diagnostics.js';
 import { initTF }           from './aio-tf.js';
+import { initLidarCam }     from './aio-lidar-cam.js';
 
 // ── Connection config ────────────────────────────────────────────────────
 export const HOST  = window.location.hostname || 'localhost';
@@ -120,5 +121,6 @@ onNavModeChange(enableNavGoalMode);
 initGraphs();
 initDiagnostics(getRos);
 initTF(getRos);
+initLidarCam(getRos);
 
 connect();

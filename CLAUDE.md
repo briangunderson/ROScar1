@@ -260,7 +260,8 @@ roscar_ws/src/roscar_web/web/
     ├── aio-map.js      # AIO: OccupancyGrid + nav goals
     ├── aio-graphs.js   # AIO: rolling sparkline charts (vx/vy/wz/battery)
     ├── aio-diagnostics.js  # AIO: /rosout log viewer
-    └── aio-tf.js       # AIO: TF tree visualizer
+    ├── aio-tf.js       # AIO: TF tree visualizer
+    └── aio-lidar-cam.js # AIO: sci-fi HUD lidar depth overlay on camera feed
 ```
 
 ### AIO Dashboard (aio.html)
@@ -277,6 +278,7 @@ Access at `http://<robot-ip>:8888/aio.html` — coexists with original tabbed UI
 - **Sparkline graphs**: Rolling 60s canvas charts for vx, vy, wz, battery with hover tooltips
 - **Diagnostics log viewer**: `/rosout` subscriber, severity filtering (ALL/INFO/WARN/ERR), 500-entry FIFO, auto-scroll
 - **TF tree visualizer**: `/tf` + `/tf_static` subscribers, HTML tree with staleness detection
+- **Lidar depth overlay**: Sci-fi HUD overlay on camera feed — projects /scan points within camera FOV as depth-coloured bars, proximity warning vignette, nearest-object callout, sweep animation. Toggle via DEPTH button in camera controls.
 
 **Module architecture**: Each `aio-*.js` is an ES module. `aio-app.js` is the entry point that creates the ROS connection, E-STOP handler, and initializes all modules. Data sharing uses callbacks (`onOdomData`, `onBatteryData`) to avoid duplicate subscriptions.
 
