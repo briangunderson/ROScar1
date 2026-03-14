@@ -28,4 +28,19 @@ source "$HOME/roscar_ws/install/setup.bash"
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 export CYCLONEDDS_URI=file://$HOME/cyclonedds.xml
 
+# Verify CycloneDDS can actually create a node before launching the
+# full stack. On boot, DDS shared-memory init can race even after the
+# network is up, causing "error creating node" in some/all nodes.
+MAX_DDS_WAIT=30
+dds_waited=0
+while ! python3 -c "import rclpy; rclpy.init(); n = rclpy.create_node('_dds_probe'); n.destroy_node(); rclpy.shutdown()" 2>/dev/null; do
+    if [ "$dds_waited" -ge "$MAX_DDS_WAIT" ]; then
+        echo "WARNING: DDS probe still failing after ${MAX_DDS_WAIT}s — launching anyway" >&2
+        break
+    fi
+    echo "Waiting for DDS (${dds_waited}s)..." >&2
+    sleep 1
+    dds_waited=$((dds_waited + 1))
+done
+
 exec ros2 launch roscar_web web.launch.py
