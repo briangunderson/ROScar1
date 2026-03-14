@@ -206,18 +206,22 @@ function _handleInputReport(event) {
   const { reportId, data } = event;
   lastReportAt = performance.now();
 
-  if (reportId === REPORT_TRANSLATION) {
-    // 6 bytes: X (Int16LE), Y (Int16LE), Z (Int16LE)
-    if (data.byteLength >= 6) {
-      raw.cx = data.getInt16(0, true);  // X: right push
-      raw.cy = data.getInt16(2, true);  // Y: forward push (SpaceMouse forward = +Y)
-      // Z (up/down) not used for 2D ground robot
-    }
+  if (reportId === REPORT_TRANSLATION && data.byteLength >= 12) {
+    // 12-byte combined report (SpaceMouse Wireless): TX, TY, TZ, RX, RY, RZ (Int16LE each)
+    raw.cx  = data.getInt16(0, true);   // X: right push
+    raw.cy  = -data.getInt16(2, true);  // Y: forward push (HID forward = -Y)
+    raw.crz = data.getInt16(10, true);  // Rz at offset 10: twist CW
+  } else if (reportId === REPORT_TRANSLATION && data.byteLength >= 6) {
+    // 6-byte translation-only report (SpaceMouse Pro/Enterprise)
+    raw.cx = data.getInt16(0, true);
+    raw.cy = -data.getInt16(2, true);
   } else if (reportId === REPORT_ROTATION) {
-    // 6 bytes: Rx (Int16LE), Ry (Int16LE), Rz (Int16LE)
     if (data.byteLength >= 6) {
-      // Rx, Ry not used; Rz = twist CW
-      raw.crz = data.getInt16(4, true); // Rz
+      // Full 6-byte report (SpaceMouse Pro, Enterprise): Rx, Ry, Rz
+      raw.crz = data.getInt16(4, true); // Rz at offset 4
+    } else if (data.byteLength >= 2) {
+      // Short 2-byte report (SpaceMouse Compact, Wireless): Rz only
+      raw.crz = data.getInt16(0, true); // Rz at offset 0
     }
   } else if (reportId === REPORT_BUTTONS) {
     // Detect rising edge: fire E-STOP only on 0→non-zero transition

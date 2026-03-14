@@ -25,6 +25,7 @@ def _launch_camera(context):
     params = {
         'video_device': video_device,
         'image_size': [width, height],
+        'io_method': 'read',
         'camera_frame_id': 'camera_optical_frame',
     }
     if camera_info_url:
