@@ -57,6 +57,8 @@ Key: EKF owns odom->base_footprint TF (driver publish_odom_tf=false)
 | `roscar_ws/src/roscar_web/launch/web.launch.py` | Web dashboard (rosbridge+video+http) |
 | `roscar_ws/src/roscar_web/roscar_web/launch_manager_node.py` | Mode switching service node |
 | `roscar_ws/src/roscar_web/roscar_web/http_server_node.py` | Static file server node |
+| `roscar_ws/src/roscar_driver/roscar_driver/landmark_localizer_node.py` | ArUco marker-based pose correction |
+| `roscar_ws/src/roscar_driver/config/landmark_params.yaml` | Landmark localizer config |
 | `scripts/setup_rpi.sh` | RPi5 initial setup script |
 
 ## Packages
@@ -146,6 +148,46 @@ Key: EKF owns odom->base_footprint TF (driver publish_odom_tf=false)
 - **RPi5-tuned**: controller 10Hz, local costmap 5Hz, global costmap 1Hz
 - **Costmap inflation**: 0.08m inflation_radius, cost_scaling_factor 3.0 (tight for indoor use)
 - **Collision monitor**: PolygonStop disabled (robot operates in tight spaces)
+- **Landmark localizer**: ArUco marker-based pose correction (auto-learn mode)
+
+### Landmark Localizer (ArUco Pose Correction)
+Addresses SLAM drift in featureless corridors. When the robot sees an ArUco marker
+whose map-frame position is known, it computes the drift and publishes a corrected
+pose to `/initialpose` to relocalize slam_toolbox or AMCL.
+
+**Node**: `landmark_localizer` (roscar_driver package, runs on Pi)
+**Config**: `roscar_driver/config/landmark_params.yaml`
+**Persistence**: Learned marker positions saved to `~/roscar_ws/learned_markers.yaml`
+
+**How it works**:
+1. ArUco detector (on dev PC) publishes TF: `camera_link → aruco_{id}`
+2. Landmark localizer (on Pi) looks up `map → aruco_{id}` via the full TF chain
+3. First sighting: records marker's map-frame position (auto-learn)
+4. Subsequent sightings: compares observed vs. known position
+5. If drift > 0.3m and robot is stationary: publishes `/initialpose` correction
+
+**Safety guards**:
+- Only corrects when robot velocity < 0.05 m/s (stationary)
+- Rate-limited to one correction per 10 seconds
+- Ignores markers > 3m away (unreliable pose at distance)
+- Skips stale TFs (marker not currently visible)
+
+**Marker setup**: Print ArUco markers from DICT_4X4_50 at 15cm size (chev.me/arucogen).
+Place on walls in featureless areas (hallways, open rooms). The localizer auto-learns
+positions on first sighting — no manual measurement needed.
+
+**slam_toolbox tuning** (anti-drift, applied to both slam_toolbox.yaml and nav2_params.yaml):
+| Parameter | Original | Tuned | Rationale |
+|-----------|----------|-------|-----------|
+| `max_laser_range` | 12.0 | 8.0 | Trim noisy long-range returns |
+| `minimum_time_interval` | 0.5 | 0.3 | 50% faster scan processing |
+| `minimum_travel_distance` | 0.3 | 0.2 | 33% tighter matching |
+| `minimum_travel_heading` | 0.3 | 0.2 | 33% tighter |
+| `loop_search_maximum_distance` | 3.0 | 4.0 | Wider loop closure search |
+
+**Known limitation**: `correlation_search_space_dimension` > 0.5 crashes slam_toolbox
+with "unable to get pointer in probability search" (OOB in internal probability grid).
+Must stay at 0.5 (default).
 
 ### cmd_vel Pipeline (when Nav2 is running)
 ```

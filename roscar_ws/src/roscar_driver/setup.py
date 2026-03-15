@@ -23,6 +23,7 @@ setup(
     entry_points={
         'console_scripts': [
             'driver_node = roscar_driver.driver_node:main',
+            'landmark_localizer = roscar_driver.landmark_localizer_node:main',
         ],
     },
 )
