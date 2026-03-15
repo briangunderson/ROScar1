@@ -9,7 +9,8 @@
 import { onAppEvent } from './aio-app.js';
 
 // ── Tunables ────────────────────────────────────────────────────────────────
-const CAMERA_HFOV  = 60 * (Math.PI / 180);   // horizontal FOV in radians (~60° Logitech)
+// HFOV from calibration: 2 * atan(320 / 924) ≈ 38.1° (fx=924, 640px width)
+const CAMERA_HFOV  = 2 * Math.atan(320 / 924); // ~0.665 rad ≈ 38.1°
 const HALF_FOV     = CAMERA_HFOV / 2;
 const MAX_RANGE    = 4.0;                     // metres — clamp display beyond this
 const WARN_RANGE   = 0.5;                     // proximity-warning threshold (metres)
