@@ -1,0 +1,2 @@
+# Allow roscar-recovery service to manage roscar-web without password
+brian ALL=(ALL) NOPASSWD: /usr/bin/systemctl start roscar-web, /usr/bin/systemctl stop roscar-web, /usr/bin/systemctl restart roscar-web

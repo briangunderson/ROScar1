@@ -57,6 +57,7 @@ Key: EKF owns odom->base_footprint TF (driver publish_odom_tf=false)
 | `roscar_ws/src/roscar_web/launch/web.launch.py` | Web dashboard (rosbridge+video+http) |
 | `roscar_ws/src/roscar_web/roscar_web/launch_manager_node.py` | Mode switching service node |
 | `roscar_ws/src/roscar_web/roscar_web/http_server_node.py` | Static file server node |
+| `scripts/roscar-recovery.py` | Standalone recovery HTTP server (port 9999) |
 | `scripts/setup_rpi.sh` | RPi5 initial setup script |
 
 ## Packages
@@ -343,6 +344,48 @@ SpaceMouse has its own speed limits, independent of the dashboard speed sliders 
 **Signal pipeline**: raw HID (±350 counts) → deadzone → normalize [-1,+1] → sensitivity curve → scale by max speed → output m/s and rad/s.
 
 **Staleness**: If no HID report for 200ms, velocity returns null (puck released or device sleeping). Sleep indicator shown after 5s of inactivity.
+
+## Recovery Service (port 9999)
+
+Standalone admin page for restarting the web stack when the AIO dashboard is unresponsive. Zero ROS2 dependencies — pure Python stdlib `http.server`.
+
+### Architecture
+- **Separate systemd service** (`roscar-recovery.service`): independent of `roscar-web.service`
+- **Single script** (`scripts/roscar-recovery.py`): inline HTML, no external files
+- **Passwordless sudo**: sudoers rule allows `brian` to start/stop/restart `roscar-web` only
+
+### Access
+```
+http://<robot-ip>:9999/
+```
+
+### Endpoints
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/` | Recovery page (status + Start/Restart/Stop buttons) |
+| GET | `/status` | JSON: service state, uptime, hostname |
+| POST | `/start` | Start roscar-web service |
+| POST | `/stop` | Stop roscar-web service |
+| POST | `/restart` | Restart roscar-web service |
+
+### Systemd
+```bash
+sudo systemctl status roscar-recovery   # check status
+sudo systemctl restart roscar-recovery  # restart recovery service itself
+sudo journalctl -u roscar-recovery -f   # follow logs
+```
+
+### Install (already in setup_rpi.sh)
+```bash
+sudo cp scripts/roscar-recovery.service /etc/systemd/system/
+sudo cp scripts/roscar-recovery-sudoers /etc/sudoers.d/roscar-recovery
+sudo chmod 440 /etc/sudoers.d/roscar-recovery
+chmod +x scripts/roscar-recovery.py
+sudo systemctl daemon-reload
+sudo systemctl enable roscar-recovery
+sudo systemctl start roscar-recovery
+```
+
 ## Computer Vision (roscar_cv)
 
 ### Architecture

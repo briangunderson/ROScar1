@@ -1,0 +1,23 @@
+[Unit]
+Description=ROScar1 Recovery Service (port 9999)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=brian
+ExecStart=/usr/bin/python3 /home/brian/ROScar1/scripts/roscar-recovery.py
+Restart=always
+RestartSec=3
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+TimeoutStopSec=5
+KillSignal=SIGINT
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=roscar-recovery
+
+[Install]
+WantedBy=multi-user.target

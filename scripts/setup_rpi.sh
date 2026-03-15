@@ -69,7 +69,7 @@ echo "  -> YB-ERF01-V3.0 will be available at /dev/roscar_board"
 echo "  -> RPLIDAR C1 will be available at /dev/rplidar"
 
 # ---- 6. Clone sllidar_ros2 (RPLIDAR C1 driver) ----
-echo "[6/7] Cloning sllidar_ros2 driver..."
+echo "[6/8] Cloning sllidar_ros2 driver..."
 WORKSPACE_SRC="/home/${SUDO_USER:-$USER}/roscar_ws/src"
 if [ ! -d "${WORKSPACE_SRC}/sllidar_ros2" ]; then
     sudo -u "${SUDO_USER:-$USER}" git clone \
@@ -81,7 +81,7 @@ else
 fi
 
 # ---- 7. Install Rosmaster_Lib ----
-echo "[7/7] Installing Rosmaster_Lib..."
+echo "[7/8] Installing Rosmaster_Lib..."
 # The Rosmaster_Lib Python package is distributed by Yahboom.
 # Download from: https://github.com/YahboomTechnology/ROS-robot-expansion-board
 # Or from the Yahboom product page downloads section.
@@ -94,6 +94,27 @@ echo "  -> NOTE: You must install Rosmaster_Lib manually."
 echo "     Download from Yahboom, then run:"
 echo "       cd <path-to>/Rosmaster_Lib"
 echo "       sudo python3 setup.py install"
+
+# ---- 8. Install systemd services ----
+echo "[8/8] Installing systemd services..."
+
+# Web dashboard service
+cp "${SCRIPT_DIR}/roscar-web.service" /etc/systemd/system/
+chmod +x "${SCRIPT_DIR}/roscar-web.sh"
+echo "  -> Installed roscar-web.service"
+
+# Recovery service (standalone admin page on port 9999)
+cp "${SCRIPT_DIR}/roscar-recovery.service" /etc/systemd/system/
+chmod +x "${SCRIPT_DIR}/roscar-recovery.py"
+cp "${SCRIPT_DIR}/roscar-recovery-sudoers" /etc/sudoers.d/roscar-recovery
+chmod 440 /etc/sudoers.d/roscar-recovery
+visudo -c  # validate sudoers syntax
+echo "  -> Installed roscar-recovery.service + sudoers"
+
+systemctl daemon-reload
+systemctl enable roscar-web roscar-recovery
+echo "  -> Services enabled (will start on next boot)"
+echo "  -> To start now: systemctl start roscar-web roscar-recovery"
 
 # ---- Shell setup ----
 BASHRC="/home/${SUDO_USER:-$USER}/.bashrc"
