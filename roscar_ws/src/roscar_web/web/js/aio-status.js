@@ -16,6 +16,7 @@ const R2D      = 180 / Math.PI;
 const subs        = [];
 let setModeSvc    = null;
 let saveMapSvc    = null;
+let listMapsSvc   = null;
 let currentMode   = 'idle';
 let navGoalCallback = null;
 
@@ -172,6 +173,9 @@ function setupServices() {
   saveMapSvc = new ROSLIB.Service({
     ros, name: '/web/save_map', serviceType: 'roscar_interfaces/SaveMap',
   });
+  listMapsSvc = new ROSLIB.Service({
+    ros, name: '/web/list_maps', serviceType: 'roscar_interfaces/ListMaps',
+  });
 
   // Fetch current mode from launch_manager so UI reflects reality after refresh
   const getStatusSvc = new ROSLIB.Service({
@@ -199,6 +203,8 @@ function setupServices() {
 function setupModeButtons() {
   const navMapSelect = document.getElementById('nav-map-select');
   const applyBtn     = document.getElementById('apply-mode-btn');
+  const refreshBtn   = document.getElementById('refresh-maps-btn');
+  const dropdown     = document.getElementById('nav-map-dropdown');
   const statusMsg    = document.getElementById('mode-status-msg');
 
   document.querySelectorAll('#panel-status .mode-btn-sm[data-mode]').forEach(btn => {
@@ -207,6 +213,7 @@ function setupModeButtons() {
 
       if (mode === 'navigation') {
         if (navMapSelect) navMapSelect.classList.remove('hidden');
+        fetchMapList();
       } else {
         if (navMapSelect) navMapSelect.classList.add('hidden');
         requestSetMode(mode, '', statusMsg);
@@ -219,17 +226,64 @@ function setupModeButtons() {
     });
   });
 
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', fetchMapList);
+  }
+
   if (applyBtn) {
     applyBtn.addEventListener('click', () => {
-      const mapPath = document.getElementById('nav-map-path')?.value.trim();
-      if (!mapPath) {
-        showMsg(statusMsg, 'Map path required', 'err');
+      const selected = dropdown?.value;
+      if (!selected) {
+        showMsg(statusMsg, 'Select a map first', 'err');
         return;
       }
+      // Build full path: ~/maps/<name>.yaml
+      const mapPath = `/home/brian/maps/${selected}.yaml`;
       requestSetMode('navigation', mapPath, statusMsg);
       if (navMapSelect) navMapSelect.classList.add('hidden');
     });
   }
+}
+
+function fetchMapList() {
+  const dropdown  = document.getElementById('nav-map-dropdown');
+  const statusMsg = document.getElementById('mode-status-msg');
+  if (!dropdown) return;
+
+  if (!listMapsSvc) {
+    showMsg(statusMsg, 'Not connected', 'err');
+    return;
+  }
+
+  // Show loading state
+  dropdown.innerHTML = '<option value="" disabled selected>Loading...</option>';
+
+  listMapsSvc.callService(new ROSLIB.ServiceRequest({}), (resp) => {
+    dropdown.innerHTML = '';
+    const names = resp.map_names || [];
+    if (names.length === 0) {
+      dropdown.innerHTML = '<option value="" disabled selected>No maps found</option>';
+      return;
+    }
+    // Add placeholder
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.disabled = true;
+    placeholder.selected = true;
+    placeholder.textContent = `Select map (${names.length})`;
+    dropdown.appendChild(placeholder);
+
+    names.forEach(name => {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      dropdown.appendChild(opt);
+    });
+  }, (err) => {
+    dropdown.innerHTML = '<option value="" disabled selected>Error loading maps</option>';
+    showMsg(statusMsg, 'Failed to list maps', 'err');
+    console.warn('ListMaps service error:', err);
+  });
 }
 
 function requestSetMode(mode, mapPath, statusEl) {

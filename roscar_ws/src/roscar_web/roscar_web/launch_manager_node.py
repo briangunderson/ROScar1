@@ -16,7 +16,9 @@ import time
 import rclpy
 from rclpy.node import Node
 
-from roscar_interfaces.srv import SetMode, SaveMap, GetStatus
+import glob as globmod
+
+from roscar_interfaces.srv import SetMode, SaveMap, GetStatus, ListMaps
 
 
 AVAILABLE_MODES = ['idle', 'teleop', 'slam', 'navigation', 'slam_nav']
@@ -44,6 +46,8 @@ class LaunchManagerNode(Node):
             SaveMap, '/web/save_map', self._save_map_callback)
         self._get_status_srv = self.create_service(
             GetStatus, '/web/get_status', self._get_status_callback)
+        self._list_maps_srv = self.create_service(
+            ListMaps, '/web/list_maps', self._list_maps_callback)
 
         self.get_logger().info('Launch manager ready. Mode: idle')
 
@@ -153,6 +157,20 @@ class LaunchManagerNode(Node):
         except Exception:
             nodes = []
         response.active_nodes = nodes
+        return response
+
+    def _list_maps_callback(self, request, response):
+        maps_dir = os.path.expanduser('~/maps')
+        if not os.path.isdir(maps_dir):
+            response.map_names = []
+            return response
+
+        yaml_files = globmod.glob(os.path.join(maps_dir, '*.yaml'))
+        # Return basenames without extension, sorted alphabetically
+        names = sorted(
+            os.path.splitext(os.path.basename(f))[0] for f in yaml_files
+        )
+        response.map_names = names
         return response
 
     # ------------------------------------------------------------------ #

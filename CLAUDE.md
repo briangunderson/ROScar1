@@ -304,6 +304,7 @@ http://<robot-ip>:8888/
 | `/web/set_mode` | `roscar_interfaces/SetMode` | Switch robot launch mode |
 | `/web/save_map` | `roscar_interfaces/SaveMap` | Save current SLAM map |
 | `/web/get_status` | `roscar_interfaces/GetStatus` | Query current mode/nodes |
+| `/web/list_maps` | `roscar_interfaces/ListMaps` | List saved maps in ~/maps/ |
 
 ### Web Frontend Files
 ```

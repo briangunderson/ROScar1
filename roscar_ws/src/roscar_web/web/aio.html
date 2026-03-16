@@ -153,7 +153,10 @@
             <button class="mode-btn-sm" data-mode="slam_nav">S+N</button>
           </div>
           <div id="nav-map-select" class="nav-map-row hidden">
-            <input type="text" id="nav-map-path" class="text-input-sm mono" placeholder="/home/brian/maps/my_map.yaml">
+            <select id="nav-map-dropdown" class="select-sm mono">
+              <option value="" disabled selected>Loading maps...</option>
+            </select>
+            <button id="refresh-maps-btn" class="sm-btn" title="Refresh map list">&#x21BB;</button>
             <button id="apply-mode-btn" class="sm-btn primary">GO</button>
           </div>
           <div id="mode-status-msg" class="status-msg"></div>
