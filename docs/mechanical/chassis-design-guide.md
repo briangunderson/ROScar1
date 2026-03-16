@@ -330,12 +330,20 @@ If the new chassis is heavier (more aluminum extrusion), we need to verify the m
 | Bottom plate | 3mm aluminum | Structural base if extrusions alone aren't rigid enough |
 | Motor adapter plates | 3mm aluminum | If 3D printed brackets flex too much under load |
 
-### 7.4 Maslow / Router Table
+### 7.4 Genmitsu 4030 CNC (Plywood)
+
+Work area: 400×300mm — plenty for robot chassis plates.
 
 | Part | Material | Notes |
 |------|----------|-------|
-| Large base plate | 6mm plywood or MDF | Prototype base before committing to aluminum |
-| Cosmetic top shell | Thin plywood | Light enclosure top |
+| Base plate prototype | 6mm plywood or MDF | Test fit before committing to aluminum |
+| Top deck prototype | 3mm plywood | Sensor deck trial fit |
+| Motor mount test jig | 6mm plywood | Verify motor spacing before printing PETG brackets |
+
+**Feeds & speeds for plywood (1/8" single-flute upcut):**
+- Feed: 800–1000 mm/min, plunge: 300 mm/min
+- Depth per pass: 2mm, spindle: 10000 RPM
+- Use tabs (2mm) to prevent parts shifting during cutout
 
 ---
 
@@ -416,7 +424,7 @@ Wires everywhere: USB cables (Pi→STM32, Pi→RPLIDAR, Pi→webcam), motor wire
 1. **Measure V1** → fill in `tools/chassis_designer.py` inputs
 2. **Run calculator** → get recommended dimensions and stability analysis
 3. **CAD model** → even a simple OpenSCAD or FreeCAD model to verify clearances
-4. **Prototype in plywood** → cut base plate on Maslow, test fit components
+4. **Prototype in plywood** → cut base plate on Genmitsu 4030, test fit components
 5. **Aluminum frame** → cut extrusions to length, assemble with T-nuts
 6. **3D print brackets** → motor mounts, sensor mounts, Pi tray
 7. **CNC plates** → top deck and any adapter plates
