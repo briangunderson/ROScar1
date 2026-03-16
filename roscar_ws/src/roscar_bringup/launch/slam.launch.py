@@ -61,19 +61,14 @@ def generate_launch_description():
         }],
     )
 
-    # -- Landmark localizer (ArUco marker-based pose correction) --
-    landmark_config = os.path.join(driver_dir, 'config', 'landmark_params.yaml')
-    landmark_node = Node(
-        package='roscar_driver',
-        executable='landmark_localizer',
-        name='landmark_localizer',
-        parameters=[landmark_config],
-        output='screen',
-    )
+    # NOTE: Landmark localizer (ArUco pose correction) is NOT included here.
+    # slam_toolbox's map optimization (loop closures, scan pose adjustments)
+    # shifts the map frame, invalidating learned marker positions and causing
+    # a feedback loop. Landmark correction only works on a FIXED map
+    # (navigation.launch.py with load_learned: true).
 
     return LaunchDescription([
         robot_launch,
         slam_node,
         lifecycle_manager,
-        landmark_node,
     ])
