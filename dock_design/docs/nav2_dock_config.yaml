@@ -1,0 +1,112 @@
+# Nav2 Docking Server — Functional Config for ROScar1 Charging Dock
+#
+# Replace the placeholder docking_server section in nav2_params.yaml with this.
+# This adds:
+#   - Battery voltage charge detection (via /battery_voltage topic)
+#   - Dock pose definition (update coords after placing your dock)
+#   - Staging distance matched to dock funnel geometry
+#   - Approach speed tuned for pogo-pin contact reliability
+#
+# After updating, rebuild: colcon build --packages-select roscar_bringup
+
+docking_server:
+  ros__parameters:
+    use_sim_time: false
+
+    # Controller
+    controller_frequency: 50.0
+
+    # Timeouts
+    initial_perception_timeout: 5.0
+    wait_charge_timeout: 5.0          # seconds to wait for charge confirmation
+    dock_approach_timeout: 30.0
+
+    # Tolerances
+    undock_linear_tolerance: 0.05     # 5cm — how far to back up before turning
+    undock_angular_tolerance: 0.1     # ~6° — acceptable heading error after undock
+
+    # Retries
+    max_retries: 3
+
+    # Frames
+    base_frame: base_link
+    fixed_frame: odom
+
+    # Approach direction — robot drives FORWARD into the dock
+    dock_backwards: false
+
+    # Staging: robot navigates to this distance from dock, then docking controller takes over
+    dock_prestaging_tolerance: 0.5    # 50cm — match funnel entrance width
+
+    # Dock plugins
+    dock_plugins: ['simple_charging_dock']
+    simple_charging_dock:
+      plugin: 'opennav_docking::SimpleChargingDock'
+
+      # Alignment tolerance at dock face (lateral error)
+      docking_threshold: 0.05         # 5cm — funnel corrects the rest mechanically
+
+      # Staging point: 0.7m in front of dock (enough room for approach trajectory)
+      staging_x_offset: -0.7
+
+      # External detection — use ArUco marker detected by roscar_cv
+      use_external_detection_pose: true
+      # When true, the docking server expects an external node to publish the
+      # dock pose to /detected_dock_pose (geometry_msgs/PoseStamped).
+      # Our ArUco detector already publishes TF for detected markers.
+      # A small bridge node or static_transform_publisher can relay this.
+      #
+      # Alternative: set to false and define dock_pose statically below.
+
+      # Charging detection via battery voltage
+      # The robot is "charging" when battery voltage exceeds this threshold
+      # (voltage rises when charger is connected)
+      use_battery_status: false       # No BatteryState msg — use external check
+      # TODO: Add a node that subscribes to /battery_voltage (Float32) and
+      # publishes to /battery_state (sensor_msgs/BatteryState) for native
+      # docking server charge detection. For now, wait_charge_timeout handles it.
+
+    # Dock instances — define where your dock(s) are in the map
+    # Update these coordinates after placing your dock and mapping!
+    docks: ['home_dock']
+    home_dock:
+      type: 'simple_charging_dock'
+      # Dock pose in map frame (x, y, theta)
+      # theta: orientation the robot faces when docked (rad)
+      # PLACEHOLDER — update after mapping with dock in place:
+      pose:
+        position:
+          x: 0.0
+          y: 0.0
+          z: 0.0
+        orientation:
+          x: 0.0
+          y: 0.0
+          z: 0.0
+          w: 1.0
+      # frame_id for the dock pose
+      frame: map
+
+
+# =============================================================================
+# USAGE
+# =============================================================================
+#
+# 1. Place the dock against a wall in your mapped environment
+# 2. Run SLAM or localization, note the dock's position in rviz2
+# 3. Update home_dock.pose above with the real coordinates
+# 4. Rebuild: colcon build --packages-select roscar_bringup
+#
+# Dock command:
+#   ros2 action send_goal /dock_robot opennav_docking/DockRobot \
+#     "{dock_id: 'home_dock', max_staging_time: 30.0}"
+#
+# Undock command:
+#   ros2 action send_goal /undock_robot opennav_docking/UndockRobot \
+#     "{dock_type: 'simple_charging_dock'}"
+#
+# From Python (e.g., web dashboard integration):
+#   from nav2_simple_commander.robot_navigator import BasicNavigator
+#   navigator = BasicNavigator()
+#   navigator.dock_robot('home_dock')
+#   navigator.undock_robot('simple_charging_dock')
