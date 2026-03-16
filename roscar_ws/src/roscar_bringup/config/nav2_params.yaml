@@ -241,8 +241,8 @@ local_costmap:
       width: 3
       height: 3
       resolution: 0.05
-      # Robot footprint (PLACEHOLDER — update after measuring)
-      footprint: "[[0.125, 0.14], [0.125, -0.14], [-0.125, -0.14], [-0.125, 0.14]]"
+      # Robot footprint (measured 2026-03-16: 290x245mm overall)
+      footprint: "[[0.145, 0.123], [0.145, -0.123], [-0.145, -0.123], [-0.145, 0.123]]"
       plugins: ["obstacle_layer", "inflation_layer"]
       obstacle_layer:
         plugin: nav2_costmap_2d::ObstacleLayer
@@ -272,8 +272,8 @@ global_costmap:
       publish_frequency: 1.0
       global_frame: map
       robot_base_frame: base_footprint
-      # Robot footprint (PLACEHOLDER — update after measuring)
-      footprint: "[[0.125, 0.14], [0.125, -0.14], [-0.125, -0.14], [-0.125, 0.14]]"
+      # Robot footprint (measured 2026-03-16: 290x245mm overall)
+      footprint: "[[0.145, 0.123], [0.145, -0.123], [-0.145, -0.123], [-0.145, 0.123]]"
       resolution: 0.05
       track_unknown_space: true
       plugins: ["static_layer", "obstacle_layer", "inflation_layer"]

@@ -43,7 +43,7 @@ Key: EKF owns odom->base_footprint TF (driver publish_odom_tf=false)
 | `roscar_ws/src/roscar_driver/roscar_driver/driver_node.py` | Core node: cmd_vel->motors, sensors->topics |
 | `roscar_ws/src/roscar_driver/roscar_driver/mecanum_kinematics.py` | Odometry integration (FK) |
 | `roscar_ws/src/roscar_driver/config/driver_params.yaml` | Serial port, speed limits, frame names |
-| `roscar_ws/src/roscar_description/urdf/roscar.urdf.xacro` | Robot model (PLACEHOLDER dimensions!) |
+| `roscar_ws/src/roscar_description/urdf/roscar.urdf.xacro` | Robot model (measured 2026-03-16) |
 | `roscar_ws/src/roscar_bringup/launch/robot.launch.py` | Full robot bringup |
 | `roscar_ws/src/roscar_bringup/launch/teleop.launch.py` | Teleop + full robot |
 | `roscar_ws/src/roscar_bringup/config/ekf.yaml` | EKF sensor fusion config |
@@ -623,7 +623,7 @@ The robot is top-heavy with a short wheelbase and tips over on abrupt stops. The
 The EKF uses `imu/data_raw` directly (bypassing Madgwick filter) for angular velocity fusion. The driver sets an identity orientation quaternion (0,0,0,1) on imu/data_raw so robot_localization's frame transform is a no-op. This avoids a subtle bug where negating gyro gz corrects the angular velocity sign but breaks Madgwick's internal orientation quaternion, which robot_localization uses for frame transforms even when orientation fusion is disabled.
 
 ## TODO
-- [ ] Measure actual robot dimensions and update URDF (current values are PLACEHOLDERS)
+- [x] Measure actual robot dimensions and update URDF (measured 2026-03-16: 96.5mm wheelbase, 205mm track, 39.7mm wheel radius, 20.5mm ground clearance, 2.2kg)
 - [x] Deploy SLAM to RPi5 and test mapping (verified: /map publishing, lifecycle auto-activate working)
 - [x] WSL2 rviz2 visualization working (CycloneDDS unicast, all topics visible)
 - [x] Nav2 slam_nav mode verified on hardware (all lifecycle nodes active, collision_monitor + docking_server + route_server configured)

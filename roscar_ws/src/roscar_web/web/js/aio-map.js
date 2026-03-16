@@ -14,10 +14,10 @@ import { onAppEvent, toast } from './aio-app.js';
 let getRos;
 let mapSub   = null;
 let poseSub  = null;
-let tfClient = null;
-let hasTFPose = false;  // true when TFClient is actively providing map-frame poses
-let lastTFTime = 0;     // timestamp of last TF update (for staleness detection)
-const TF_STALE_MS = 3000; // fall back to odom if TF hasn't updated in 3s
+let tfSub = null;       // /tf subscriber (replaces TFClient which needs tf2_web_republisher)
+let mapToOdom = null;   // {tx, ty, yaw} — latest map→odom transform from slam_toolbox
+let lastTFTime = 0;     // timestamp of last map→odom TF update
+const TF_STALE_MS = 5000; // ignore map→odom if stale
 let mapData  = null;    // {width, height, resolution, origin, data[]}
 let robotPos = null;    // {x, y, yaw}
 
@@ -58,7 +58,7 @@ export function enableNavGoalMode() { setNavGoalMode(true); }
 export function clearMap() {
   mapData = null;
   robotPos = null;
-  hasTFPose = false;
+  mapToOdom = null;
   lastTFTime = 0;
   needsDraw = true;
 }
@@ -102,49 +102,50 @@ function subscribePose() {
     throttle_rate: 200,
   });
   poseSub.subscribe((msg) => {
-    // Check TF staleness: if TF hasn't updated recently, fall back to odom
-    if (hasTFPose && (Date.now() - lastTFTime) > TF_STALE_MS) {
-      hasTFPose = false;
-      console.warn('[aio-map] TF pose stale, falling back to odometry');
-    }
-    // Only use odom as fallback when TFClient isn't providing map-frame poses
-    if (hasTFPose) return;
     const q = msg.pose.pose.orientation;
     const p = msg.pose.pose.position;
-    robotPos = {
-      x: p.x, y: p.y,
-      yaw: Math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z)),
-    };
+    const odomYaw = Math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z));
+
+    // Apply map→odom transform if available and fresh
+    if (mapToOdom && (Date.now() - lastTFTime) < TF_STALE_MS) {
+      // Transform odom-frame pose into map frame:
+      // map_pos = R(map→odom_yaw) * odom_pos + map→odom_translation
+      const cos = Math.cos(mapToOdom.yaw);
+      const sin = Math.sin(mapToOdom.yaw);
+      robotPos = {
+        x: cos * p.x - sin * p.y + mapToOdom.tx,
+        y: sin * p.x + cos * p.y + mapToOdom.ty,
+        yaw: odomYaw + mapToOdom.yaw,
+      };
+    } else {
+      // No map→odom TF (teleop-only mode): use odom frame directly
+      robotPos = { x: p.x, y: p.y, yaw: odomYaw };
+    }
     needsDraw = true;
   });
 }
 
 function subscribeTF() {
+  // Subscribe directly to /tf and extract the map→odom transform.
+  // This avoids needing tf2_web_republisher (which has Jazzy compat issues).
   const ros = getRos(); if (!ros) return;
-  if (tfClient) { try { tfClient.dispose(); } catch (_) {} }
-  tfClient = new ROSLIB.TFClient({
-    ros,
-    fixedFrame: 'map',
-    angularThres: 0.01,
-    transThres: 0.01,
-    rate: 10.0,
+  if (tfSub) { try { tfSub.unsubscribe(); } catch (_) {} }
+  tfSub = new ROSLIB.Topic({
+    ros, name: '/tf', messageType: 'tf2_msgs/TFMessage',
+    throttle_rate: 100,  // 10Hz is plenty for map→odom
   });
-  tfClient.subscribe('base_footprint', (tf) => {
-    // Sanity check: reject clearly invalid transforms
-    const tx = tf.translation.x, ty = tf.translation.y;
-    if (!isFinite(tx) || !isFinite(ty) || Math.abs(tx) > 1000 || Math.abs(ty) > 1000) {
-      console.warn('[aio-map] TF gave suspicious pose:', tx, ty, '— ignoring');
-      return;
+  tfSub.subscribe((msg) => {
+    for (const t of msg.transforms) {
+      if (t.header.frame_id === 'map' && t.child_frame_id === 'odom') {
+        const tr = t.transform.translation;
+        const q = t.transform.rotation;
+        const yaw = Math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z));
+        mapToOdom = { tx: tr.x, ty: tr.y, yaw };
+        lastTFTime = Date.now();
+        needsDraw = true;
+        break;
+      }
     }
-    hasTFPose = true;
-    lastTFTime = Date.now();
-    const q = tf.rotation;
-    robotPos = {
-      x: tx,
-      y: ty,
-      yaw: Math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z)),
-    };
-    needsDraw = true;
   });
 }
 
