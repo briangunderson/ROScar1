@@ -204,3 +204,32 @@
 - CH340 (1a86:7523) → /dev/roscar_board (motor board)
 - CP210x (10c4:ea60) → /dev/rplidar (RPLIDAR C1)
 - Both symlinks confirmed working on first boot after setup_rpi.sh
+
+## ArUco Marker Coordinate Frames (CRITICAL)
+- OpenCV's `estimatePoseSingleMarkers` returns `tvec` in **optical frame** convention: x=right, y=down, z=forward (depth)
+- The ArUco detector node publishes this as `frame_id: camera_link` but the coordinates are NOT in camera_link convention
+- **WRONG approach**: manually convert optical→camera_link (`cam_x=opt_z, cam_y=-opt_x, cam_z=-opt_y`). This is error-prone and placed markers behind/to-side of the robot on the map.
+- **CORRECT approach**: look up `map → camera_optical_frame` TF and use the raw tvec directly. The URDF defines `camera_optical_frame` with `rpy=(-π/2, 0, -π/2)` relative to `camera_link`, so the TF tree handles the coordinate conversion automatically.
+- **Rule**: When OpenCV returns camera-frame coordinates, use `camera_optical_frame` for TF lookups, never `camera_link`.
+
+## CycloneDDS Participant Limits
+- Default `MaxAutoParticipantIndex` is ~10 — too low when 20+ ROS2 nodes are running (SLAM + Nav2 + web stack)
+- Cross-machine `/tf` topic delivery fails silently when participant slots are exhausted
+- **Fix**: Set `MaxAutoParticipantIndex` to 120 in cyclonedds.xml
+- Even with this fix, `/tf` is unreliable cross-machine under heavy load — prefer direct topic subscription for cross-machine data
+
+## slam_toolbox + Pose Correction
+- `async_slam_toolbox_node` in online_async mode has **zero subscribers** on `/initialpose` — cannot use it for pose corrections
+- **Fix**: Use EKF's `/set_pose` service (`robot_localization/srv/SetPose`) instead — resets the odom→base_footprint transform
+- slam_toolbox re-matches scans on next cycle, adjusting map→odom accordingly
+
+## SLAM Session-Specific Markers
+- Each SLAM restart creates a **new map frame origin** — learned marker positions from previous sessions have wrong coordinates
+- Persistence file (`learned_markers.yaml`) must NOT be loaded on SLAM startup
+- **Fix**: `load_learned` parameter (default=False) — only load in navigation mode (fixed map)
+- Dashboard reset button: clear markers (service call) → idle → wait 6s → restart SLAM
+
+## SLAM Restart Race Condition
+- Old SLAM nodes take ~5s to terminate after SIGINT (SIGINT → 5s timeout → SIGTERM)
+- Starting new SLAM immediately causes node conflicts (duplicate publishers, TF confusion)
+- **Fix**: Add 6s delay between idle and SLAM restart (setTimeout in dashboard JS)
