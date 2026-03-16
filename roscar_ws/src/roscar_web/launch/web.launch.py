@@ -68,10 +68,22 @@ def generate_launch_description():
         output='screen',
     )
 
+    # tf2_web_republisher: required by roslibjs ROSLIB.TFClient to look up
+    # TF transforms (e.g., map->base_footprint for robot pose on map).
+    # Without this, the dashboard falls back to /odometry/filtered (odom frame)
+    # which diverges from the map frame during SLAM.
+    tf2_web = Node(
+        package='tf2_web_republisher',
+        executable='tf2_web_republisher_node',
+        name='tf2_web_republisher',
+        output='screen',
+    )
+
     return LaunchDescription([
         rosbridge,
         rosapi,
         web_video,
         launch_manager,
         http_server,
+        tf2_web,
     ])
