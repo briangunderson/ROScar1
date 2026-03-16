@@ -2,26 +2,26 @@
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="roscar">
 
   <!-- ==================== Robot Dimensions ==================== -->
-  <!-- PLACEHOLDER VALUES: Measure your robot and update these!   -->
-  <xacro:property name="chassis_length" value="0.25"/>   <!-- m, front-to-back -->
-  <xacro:property name="chassis_width" value="0.20"/>    <!-- m, left-to-right -->
-  <xacro:property name="chassis_height" value="0.08"/>   <!-- m, plate thickness -->
-  <xacro:property name="chassis_z_offset" value="0.05"/> <!-- m, ground to bottom of chassis -->
+  <!-- MEASURED 2026-03-16 with calipers and tape measure            -->
+  <xacro:property name="chassis_length" value="0.200"/>   <!-- m, front-to-back (body, not incl wheel protrusion) -->
+  <xacro:property name="chassis_width" value="0.170"/>    <!-- m, left-to-right (body between wheels) -->
+  <xacro:property name="chassis_height" value="0.060"/>   <!-- m, plate/board stack thickness -->
+  <xacro:property name="chassis_z_offset" value="0.0205"/> <!-- m, ground to bottom of chassis (measured) -->
 
-  <xacro:property name="wheel_radius" value="0.033"/>    <!-- m -->
-  <xacro:property name="wheel_width" value="0.04"/>      <!-- m -->
+  <xacro:property name="wheel_radius" value="0.0397"/>    <!-- m, 79.3mm dia across mecanum rollers -->
+  <xacro:property name="wheel_width" value="0.0373"/>     <!-- m, hub face to face incl rollers -->
 
   <!-- Half-distances from center to wheel axes -->
-  <xacro:property name="wheel_x_offset" value="0.10"/>   <!-- m, half wheelbase (front-rear) -->
-  <xacro:property name="wheel_y_offset" value="0.12"/>   <!-- m, half track width (left-right) -->
+  <xacro:property name="wheel_x_offset" value="0.0483"/>  <!-- m, half of 96.55mm wheelbase -->
+  <xacro:property name="wheel_y_offset" value="0.1025"/>  <!-- m, half of 205mm track width -->
 
-  <!-- Camera position (relative to base_link) -->
+  <!-- Camera position (relative to base_link) — TODO: measure precisely -->
   <xacro:property name="camera_x" value="0.12"/>
   <xacro:property name="camera_z" value="0.10"/>
 
-  <!-- Lidar position (relative to base_link) -->
+  <!-- Lidar position (relative to base_link) — TODO: measure precisely -->
   <xacro:property name="lidar_x" value="0.0"/>
-  <xacro:property name="lidar_z" value="0.09"/>  <!-- top platform, scan plane ~18cm from floor -->
+  <xacro:property name="lidar_z" value="0.09"/>  <!-- scan plane ~18cm from floor -->
 
   <!-- ==================== Materials ==================== -->
   <material name="dark_grey">
@@ -58,7 +58,7 @@
       </geometry>
     </collision>
     <inertial>
-      <mass value="2.0"/>
+      <mass value="2.2"/>  <!-- measured total 2200g, minus ~400g for 4 wheels -->
       <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/>
     </inertial>
   </link>
