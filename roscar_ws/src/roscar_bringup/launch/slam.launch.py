@@ -20,6 +20,7 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     bringup_dir = get_package_share_directory('roscar_bringup')
+    driver_dir = get_package_share_directory('roscar_driver')
 
     # -- Full robot bringup (driver + URDF + lidar + IMU filter + EKF) --
     robot_launch = IncludeLaunchDescription(
@@ -60,8 +61,19 @@ def generate_launch_description():
         }],
     )
 
+    # -- Landmark localizer (ArUco marker-based pose correction) --
+    landmark_config = os.path.join(driver_dir, 'config', 'landmark_params.yaml')
+    landmark_node = Node(
+        package='roscar_driver',
+        executable='landmark_localizer',
+        name='landmark_localizer',
+        parameters=[landmark_config],
+        output='screen',
+    )
+
     return LaunchDescription([
         robot_launch,
         slam_node,
         lifecycle_manager,
+        landmark_node,
     ])

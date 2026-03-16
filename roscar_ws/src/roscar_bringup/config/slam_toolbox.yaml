@@ -27,18 +27,18 @@ slam_toolbox:
 
     # -- Map resolution --
     resolution: 0.05              # 5cm grid — good indoor balance
-    max_laser_range: 12.0         # RPLIDAR C1 rated ~12m
-    minimum_time_interval: 0.5    # Don't process scans faster than 2Hz
+    max_laser_range: 8.0          # Trim noisy long-range returns that confuse matching
+    minimum_time_interval: 0.3    # Process scans at ~3Hz (balanced: faster than 2Hz but won't flood queue)
     transform_timeout: 0.5        # Tolerant for RPi5 timing jitter
     tf_buffer_duration: 30.0
 
     # -- Scan matching thresholds --
-    # Only add a new scan if robot has moved enough
-    minimum_travel_distance: 0.3  # meters
-    minimum_travel_heading: 0.3   # radians (~17 deg)
+    # Moderately tighter thresholds to reduce drift without flooding the async queue
+    minimum_travel_distance: 0.2  # meters (was 0.3 — 33% tighter, won't overwhelm solver)
+    minimum_travel_heading: 0.2   # radians (~11.5 deg, was 0.3)
 
     # -- Loop closure --
-    loop_search_maximum_distance: 3.0   # meters — limit search radius
+    loop_search_maximum_distance: 4.0   # meters — wider search for recovery
     do_loop_closing: true
     loop_match_minimum_chain_size: 3
     loop_match_maximum_variance_coarse: 3.0
@@ -46,7 +46,7 @@ slam_toolbox:
     loop_match_minimum_response_fine: 0.45
 
     # -- Correlation search (scan matching) --
-    correlation_search_space_dimension: 0.5
+    correlation_search_space_dimension: 0.5   # Default — larger values crash slam_toolbox (probability grid OOB)
     correlation_search_space_resolution: 0.01
     correlation_search_space_smear_deviation: 0.1
 

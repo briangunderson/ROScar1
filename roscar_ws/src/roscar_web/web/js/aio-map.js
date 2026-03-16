@@ -34,6 +34,10 @@ let navGoalMode = false;
 let goalActionClient = null;
 let goalHandle      = null;
 
+// Landmark markers from /landmark/known_markers
+let landmarkSub = null;
+let knownMarkers = [];  // [{id, x, y, yaw, visible}]
+
 let rafId = null;
 let needsDraw = true;
 
@@ -43,7 +47,7 @@ export function initMap(getRosFn) {
   setupControls();
   setupResizeObserver();
   onAppEvent((ev) => {
-    if (ev === 'connected') { subscribeMap(); subscribePose(); subscribeTF(); }
+    if (ev === 'connected') { subscribeMap(); subscribePose(); subscribeTF(); subscribeLandmarks(); }
   });
   startRAFLoop();
 }
@@ -141,6 +145,21 @@ function subscribeTF() {
       yaw: Math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z)),
     };
     needsDraw = true;
+  });
+}
+
+function subscribeLandmarks() {
+  const ros = getRos(); if (!ros) return;
+  if (landmarkSub) { try { landmarkSub.unsubscribe(); } catch (_) {} }
+  landmarkSub = new ROSLIB.Topic({
+    ros, name: '/landmark/known_markers', messageType: 'std_msgs/String',
+    throttle_rate: 2000,
+  });
+  landmarkSub.subscribe((msg) => {
+    try {
+      knownMarkers = JSON.parse(msg.data);
+      needsDraw = true;
+    } catch (_) {}
   });
 }
 
@@ -287,6 +306,15 @@ function drawMap() {
       drawRobotPose(ctx);
     }
   }
+
+  // Landmark markers
+  if (knownMarkers.length > 0 && mapData) {
+    if (robotLocked && robotPos) {
+      drawLandmarksLocked(ctx, c);
+    } else {
+      drawLandmarks(ctx);
+    }
+  }
 }
 
 /** Free mode: robot drawn at computed screen position, arrow rotated by heading. */
@@ -353,6 +381,74 @@ function drawRing(ctx, sx, sy) {
   ctx.beginPath();
   ctx.arc(sx, sy, 14, 0, Math.PI * 2);
   ctx.stroke();
+  ctx.restore();
+}
+
+// ── Landmark marker drawing ──────────────────────────────────────────────────
+/** Convert a map-frame (x, y) to screen coords in free mode. */
+function mapToScreen(mx, my) {
+  if (!mapData) return null;
+  const col = (mx - mapData.origin.x) / mapData.resolution;
+  const row = (my - mapData.origin.y) / mapData.resolution;
+  // Same transform as robot pose: 90° CCW rotated view
+  const sx = viewOffset.x + (mapData.height - row) * viewScale;
+  const sy = viewOffset.y + (mapData.width  - col) * viewScale;
+  return { x: sx, y: sy };
+}
+
+/** Draw all known landmark markers in free mode. */
+function drawLandmarks(ctx) {
+  for (const m of knownMarkers) {
+    const sp = mapToScreen(m.x, m.y);
+    if (!sp) continue;
+    drawMarkerIcon(ctx, sp.x, sp.y, m.id, m.visible);
+  }
+}
+
+/** Draw all known landmark markers in locked mode. */
+function drawLandmarksLocked(ctx, c) {
+  const ccx = c.width / 2, ccy = c.height / 2;
+  for (const m of knownMarkers) {
+    const sp = mapToScreen(m.x, m.y);
+    if (!sp) continue;
+    // Apply the locked-mode rotation around canvas center
+    const dx = sp.x - ccx, dy = sp.y - ccy;
+    const cosA = Math.cos(robotPos.yaw), sinA = Math.sin(robotPos.yaw);
+    const rx = dx * cosA - dy * sinA + ccx;
+    const ry = dx * sinA + dy * cosA + ccy;
+    drawMarkerIcon(ctx, rx, ry, m.id, m.visible);
+  }
+}
+
+/** Draw a single landmark marker icon: diamond with ID label. */
+function drawMarkerIcon(ctx, sx, sy, id, visible) {
+  const size = 7;
+  const color = visible ? '#00ff88' : '#00d4ff';
+  const alpha = visible ? 1.0 : 0.6;
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+
+  // Diamond shape
+  ctx.beginPath();
+  ctx.moveTo(sx, sy - size);
+  ctx.lineTo(sx + size, sy);
+  ctx.lineTo(sx, sy + size);
+  ctx.lineTo(sx - size, sy);
+  ctx.closePath();
+  ctx.fillStyle = visible ? 'rgba(0,255,136,0.25)' : 'rgba(0,212,255,0.15)';
+  ctx.fill();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // ID label
+  ctx.fillStyle = color;
+  ctx.font = '600 9px Rajdhani, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText(`A${id}`, sx, sy - size - 2);
+
   ctx.restore();
 }
 

@@ -1,0 +1,25 @@
+# Landmark localizer: ArUco marker-based pose correction
+#
+# Auto-learn mode (default): First time a marker is seen, its map-frame
+# position is recorded. Subsequent sightings correct drift if it exceeds
+# the threshold. Learned positions persist in ~/roscar_ws/learned_markers.yaml.
+#
+# To pre-configure marker positions instead, set auto_learn: false and
+# edit ~/roscar_ws/learned_markers.yaml with known positions:
+#   "0":
+#     x: 1.5
+#     y: 2.0
+#     z: 0.0
+#     yaw: 1.57
+
+landmark_localizer:
+  ros__parameters:
+    check_rate: 2.0               # Hz — how often to check for visible markers
+    correction_threshold: 0.3     # meters — only correct if drift exceeds this
+    correction_interval: 10.0     # seconds — minimum time between corrections
+    max_marker_distance: 3.0      # meters — ignore markers further than this
+    velocity_threshold: 0.05      # m/s — only correct when robot is ~stopped
+    auto_learn: true              # auto-learn marker positions on first sighting
+    learned_markers_file: "/home/brian/roscar_ws/learned_markers.yaml"
+    tf_prefix: "aruco_"
+    marker_ids: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]

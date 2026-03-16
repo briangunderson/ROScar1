@@ -313,9 +313,16 @@ function setupMapReset() {
     }
 
     const restoreMode = currentMode;
-    showMsg(msgEl, 'Resetting map...');
+    showMsg(msgEl, 'Resetting map & markers...');
     clearMap();
     toast('Resetting SLAM map...', 'ok');
+
+    // Step 0: clear learned landmarks before killing nodes
+    const clearSvc = new ROSLIB.Service({
+      ros: getRos(), name: '/landmark/clear_markers',
+      serviceType: 'std_srvs/srv/Trigger',
+    });
+    clearSvc.callService(new ROSLIB.ServiceRequest({}), () => {}, () => {});
 
     // Step 1: switch to idle (kills slam_toolbox)
     const idleReq = new ROSLIB.ServiceRequest({ mode: 'idle', map_path: '' });
@@ -324,7 +331,9 @@ function setupMapReset() {
         showMsg(msgEl, 'Reset failed (idle): ' + (resp.message || ''), 'err');
         return;
       }
-      // Step 2: switch back to SLAM mode (restarts slam_toolbox with fresh map)
+      // Step 2: wait for old nodes to fully shut down, then restart SLAM
+      showMsg(msgEl, 'Waiting for shutdown...');
+      setTimeout(() => {
       const restoreReq = new ROSLIB.ServiceRequest({ mode: restoreMode, map_path: '' });
       setModeSvc.callService(restoreReq, (resp2) => {
         if (resp2.success) {
@@ -340,6 +349,7 @@ function setupMapReset() {
           toast('Map reset failed on restore', 'err');
         }
       });
+      }, 6000);  // 6s delay: old nodes need ~5s to fully terminate
     });
   });
 }
