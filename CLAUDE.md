@@ -493,7 +493,14 @@ pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu12
 ### Dashboard Integration
 - **Feed toggle**: RAW/CV button in camera panel header switches between `/image_raw` and `/image_annotated`
 - **Detection overlay**: Shows object counts from `/detections` (e.g., "2 person · 1 chair")
+- **CV stream routing**: Raw feeds from Pi's web_video_server (port 8080), annotated feeds from WSL2's web_video_server (port 8081)
+- **Access**: `http://<pi-ip>:8888/aio.html?cv_host=<wsl2-ip>` (cv_host persisted in localStorage)
 - Module: `aio-cv.js` — imported and initialized by `aio-app.js`
+
+### Gotchas
+- **vision_msgs v4 (Jazzy)**: Use `hyp.hypothesis.class_id` and `hyp.hypothesis.score`, NOT `hyp.id`/`hyp.score`
+- **Parameter typing**: `declare_parameter('classes', [])` crashes — use `rclpy.Parameter.Type.INTEGER_ARRAY`
+- **CycloneDDS localhost peer**: Required for web_video_server to discover YOLO's `/image_annotated` topic
 
 ## Build & Run
 
@@ -540,7 +547,8 @@ Both Pi (`~/cyclonedds.xml`) and WSL2 (`~/cyclonedds.xml`) use unicast peer disc
 - Pi peers: `localhost` + WSL2's LAN IP (e.g., 192.168.1.194)
 - WSL2 peers: `localhost` + Pi IP (192.168.1.170)
 - `AllowMulticast=false` (multicast doesn't reliably cross WSL2 boundary)
-- **CRITICAL**: WSL2 config MUST include `<Interfaces><NetworkInterface name="eth0" /></Interfaces>` (or whichever interface has the LAN IP — check with `ip -4 addr show`). Docker Desktop creates bridge networks that CycloneDDS may bind to instead, causing discovery to silently fail. Interface name can shift between `eth0`/`eth1` after Windows/WSL updates.
+- **CRITICAL**: WSL2 config MUST include `<Interfaces><NetworkInterface address="192.168.1.194" /></Interfaces>` (or whichever interface has the LAN IP — check with `ip -4 addr show`). Docker Desktop creates bridge networks that CycloneDDS may bind to instead, causing discovery to silently fail. Interface name can shift between `eth0`/`eth1` after Windows/WSL updates.
+- **CRITICAL**: WSL2 peers list MUST include `localhost` — without it, local processes (e.g., YOLO publisher and web_video_server) cannot discover each other's DDS topics when `AllowMulticast=false`.
 
 ### CRITICAL: ros2 daemon
 The ros2 daemon caches DDS discovery. If started before CycloneDDS env vars are set, it uses FastDDS and cross-machine discovery fails. Kill daemon with `pkill -f ros2.*daemon` and use `--no-daemon` for testing. `ros2 daemon stop` can itself hang if the daemon is in a bad state.
