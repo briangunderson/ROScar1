@@ -152,25 +152,48 @@ Key: EKF owns odom->base_footprint TF (driver publish_odom_tf=false)
 
 ### Landmark Localizer (ArUco Pose Correction)
 Addresses SLAM drift in featureless corridors. When the robot sees an ArUco marker
-whose map-frame position is known, it computes the drift and publishes a corrected
-pose to `/initialpose` to relocalize slam_toolbox or AMCL.
+whose map-frame position is known, it computes the drift and calls EKF's `/set_pose`
+service to correct the robot's estimated position.
 
 **Node**: `landmark_localizer` (roscar_driver package, runs on Pi)
 **Config**: `roscar_driver/config/landmark_params.yaml`
 **Persistence**: Learned marker positions saved to `~/roscar_ws/learned_markers.yaml`
+**Dashboard**: Markers shown as diamonds on AIO map tile (green=visible, cyan=known)
 
 **How it works**:
-1. ArUco detector (on dev PC) publishes TF: `camera_link → aruco_{id}`
-2. Landmark localizer (on Pi) looks up `map → aruco_{id}` via the full TF chain
-3. First sighting: records marker's map-frame position (auto-learn)
-4. Subsequent sightings: compares observed vs. known position
-5. If drift > 0.3m and robot is stationary: publishes `/initialpose` correction
+1. ArUco detector (on dev PC) publishes `/aruco/markers` (MarkerArray, optical frame coords)
+2. Landmark localizer (on Pi) subscribes directly to `/aruco/markers` (bypasses cross-machine /tf)
+3. Looks up `map → camera_optical_frame` TF (local Pi TF tree handles optical→ROS conversion)
+4. Chains transforms: `map→optical × optical→marker` to get marker position in map frame
+5. First sighting: records marker's map-frame position (auto-learn)
+6. Subsequent sightings: compares observed vs. known position
+7. If drift > 0.3m and robot is stationary: calls EKF `/set_pose` to correct pose
+
+**Key design decisions**:
+- Uses `camera_optical_frame` (not `camera_link`) for TF lookup — OpenCV's solvePnP returns
+  tvec in optical convention (x=right, y=down, z=forward). The URDF's optical joint
+  (`rpy=-π/2, 0, -π/2`) handles the coordinate conversion automatically.
+- Subscribes to `/aruco/markers` topic directly instead of using TF for ArUco frames —
+  CycloneDDS unicast has DDS discovery saturation issues with 20+ participants on `/tf`.
+- Uses EKF `/set_pose` service (not `/initialpose`) — slam_toolbox online_async mode
+  has zero subscribers on `/initialpose`.
+- `load_learned` parameter (default=False): prevents loading stale markers from previous
+  SLAM sessions (each SLAM restart creates a new map frame origin).
 
 **Safety guards**:
 - Only corrects when robot velocity < 0.05 m/s (stationary)
 - Rate-limited to one correction per 10 seconds
 - Ignores markers > 3m away (unreliable pose at distance)
-- Skips stale TFs (marker not currently visible)
+
+**Services**:
+- `/landmark/clear_markers` (std_srvs/Trigger): Clears all learned markers and deletes persistence file
+- Called by dashboard reset button before SLAM restart
+
+**Dashboard integration** (aio-map.js):
+- Subscribes to `/landmark/known_markers` (std_msgs/String, JSON, published at 2Hz)
+- `mapToScreen()` converts map-frame positions to canvas coordinates
+- Diamond icons: green (currently visible), cyan (known but not visible)
+- Works in both free and locked (robot-centered) view modes
 
 **Marker setup**: Print ArUco markers from DICT_4X4_50 at 15cm size (chev.me/arucogen).
 Place on walls in featureless areas (hallways, open rooms). The localizer auto-learns
@@ -574,3 +597,10 @@ The EKF uses `imu/data_raw` directly (bypassing Madgwick filter) for angular vel
 - [ ] Implement wireless gamepad control (Logitech F710 — USB dongle on RPi5, joy + teleop_twist_joy packages)
 - [x] Fix camera feed (io_method=read fixes YUYV mmap failure; YUYV→RGB conversion works but slow)
 - [ ] Optimize camera: switch to MJPG pixel format for faster streaming (needs cv_bridge MJPG support)
+- [x] Landmark localizer: fix marker map positions (use camera_optical_frame TF, not manual optical→camera_link conversion)
+- [x] Landmark localizer: add `/landmark/clear_markers` service for dashboard reset button
+- [x] Landmark localizer: add `load_learned` parameter (False for SLAM, prevents stale markers from old sessions)
+- [x] Dashboard: add ArUco marker diamonds on map tile (aio-map.js)
+- [x] Dashboard: fix reset button crash (add 6s shutdown delay, clear markers before restart)
+- [ ] Verify landmark drift correction end-to-end (markers learn correctly, correction needs real-world testing)
+- [ ] Add landmark_localizer to navigation.launch.py with `load_learned: true`
