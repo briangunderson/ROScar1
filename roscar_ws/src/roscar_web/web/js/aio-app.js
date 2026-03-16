@@ -20,6 +20,15 @@ import { initCV }           from './aio-cv.js';
 export const HOST  = window.location.hostname || 'localhost';
 export const PORTS = { rosbridge: 9090, video: 8080, http: 8888 };
 
+// CV video server: runs on the GPU PC (WSL2), not on the Pi.
+// Set via ?cv_host=<ip> URL param, or defaults to empty (disabled).
+// When set, CV feed streams from http://<cv_host>:8081 instead of Pi's web_video_server.
+const urlParams = new URLSearchParams(window.location.search);
+export const CV_HOST = urlParams.get('cv_host') || localStorage.getItem('cv_host') || '';
+export const CV_PORT = parseInt(urlParams.get('cv_port') || '8081', 10);
+// Persist cv_host to localStorage so the user only needs to set it once
+if (urlParams.has('cv_host')) localStorage.setItem('cv_host', urlParams.get('cv_host'));
+
 let ros       = null;
 let connected = false;
 

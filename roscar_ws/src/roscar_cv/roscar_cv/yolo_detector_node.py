@@ -19,14 +19,17 @@ class YoloDetectorNode(Node):
         self.declare_parameter('confidence_threshold', 0.5)
         self.declare_parameter('device', '0')
         self.declare_parameter('detection_rate', 15.0)
-        self.declare_parameter('classes', [])
+        self.declare_parameter('classes', rclpy.Parameter.Type.INTEGER_ARRAY)
         self.declare_parameter('annotate_image', True)
 
         model_path = self.get_parameter('model').value
         self.conf_threshold = self.get_parameter('confidence_threshold').value
         device = self.get_parameter('device').value
         self.detection_rate = self.get_parameter('detection_rate').value
-        self.filter_classes = self.get_parameter('classes').value
+        try:
+            self.filter_classes = self.get_parameter('classes').value or []
+        except rclpy.exceptions.ParameterUninitializedException:
+            self.filter_classes = []
         self.annotate = self.get_parameter('annotate_image').value
 
         # Rate limiting
@@ -64,13 +67,25 @@ class YoloDetectorNode(Node):
         self.image_pub = self.create_publisher(Image, '/image_annotated', 1)
         self.detect_pub = self.create_publisher(Detection2DArray, '/detections', 10)
 
-        # Subscriber
-        self.create_subscription(Image, '/image_raw', self.image_cb, 1)
+        # Subscriber — use QoS depth 5 to avoid drops during GPU inference spikes
+        from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+        img_qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=5,
+        )
+        self.create_subscription(Image, '/image_raw', self.image_cb, img_qos)
+        self._frame_count = 0
+
+        self.get_logger().info('Subscribed to /image_raw (BEST_EFFORT, depth=5)')
 
     def image_cb(self, msg):
         """Run YOLO inference on incoming frame."""
         if self.model is None:
             return
+        self._frame_count += 1
+        if self._frame_count <= 3 or self._frame_count % 100 == 0:
+            self.get_logger().info(f'image_cb frame #{self._frame_count}')
 
         now = self.get_clock().now().nanoseconds / 1e9
         if (now - self.last_detect_time) < self.min_period:
@@ -115,16 +130,14 @@ class YoloDetectorNode(Node):
                 det.bbox.size_y = float(y2 - y1)
 
                 # Hypothesis (class + confidence)
-                # vision_msgs v4 (Jazzy): fields are hyp.id and hyp.score directly
-                hyp = ObjectHypothesisWithPose()
-                hyp.id = str(int(box.cls[0].item()))
-                hyp.score = float(box.conf[0].item())
-                det.results.append(hyp)
-
-                # Add class name as id for convenience
+                # vision_msgs v4 (Jazzy): hyp.hypothesis.class_id / .score
                 cls_idx = int(box.cls[0].item())
-                if cls_idx < len(result.names):
-                    det.id = result.names[cls_idx]
+                cls_name = result.names.get(cls_idx, str(cls_idx))
+
+                hyp = ObjectHypothesisWithPose()
+                hyp.hypothesis.class_id = cls_name
+                hyp.hypothesis.score = float(box.conf[0].item())
+                det.results.append(hyp)
 
                 det_array.detections.append(det)
 

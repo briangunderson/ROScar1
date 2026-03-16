@@ -233,3 +233,12 @@
 - Old SLAM nodes take ~5s to terminate after SIGINT (SIGINT → 5s timeout → SIGTERM)
 - Starting new SLAM immediately causes node conflicts (duplicate publishers, TF confusion)
 - **Fix**: Add 6s delay between idle and SLAM restart (setTimeout in dashboard JS)
+
+## Landmark Localizer vs SLAM (CRITICAL)
+- Landmark localizer and slam_toolbox online_async are **fundamentally incompatible**
+- slam_toolbox's map optimization (loop closures, scan pose adjustments) shifts the map frame over time
+- Learned marker positions become stale after map optimization — correction teleports robot to wrong position
+- SLAM then fights the correction, creating a feedback loop: marker corrects → SLAM adjusts → marker corrects to stale position → repeat
+- Observed: 4.98m "drift correction" with 105° yaw change — not drift correction, it's teleportation
+- **Rule**: NEVER run landmark localizer during SLAM mapping. Only use on a FIXED map (navigation mode with `load_learned: true`)
+- Landmark localizer belongs in `navigation.launch.py`, NOT `slam.launch.py`
