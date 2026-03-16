@@ -3,13 +3,14 @@
  * Uses a plain <img> tag; web_video_server provides the stream URL.
  */
 
-import { HOST, PORTS, onAppEvent, toast } from './aio-app.js';
+import { HOST, PORTS, CV_HOST, CV_PORT, onAppEvent, toast } from './aio-app.js';
 
 let quality    = 80;
 let resolution = '640x480';
 let streaming  = false;
 
 let topic = '/image_raw';
+let cvMode = false;  // true when showing annotated feed from CV server
 const PANEL = '#panel-camera';
 const RETRY_INTERVAL = 3000; // ms — retry stream when offline
 
@@ -22,7 +23,8 @@ export function initCamera() {
   });
   // CV feed toggle: switch between /image_raw and /image_annotated
   window.addEventListener('cv-feed-change', (e) => {
-    topic = e.detail.annotated ? '/image_annotated' : '/image_raw';
+    cvMode = e.detail.annotated;
+    topic = cvMode ? '/image_annotated' : '/image_raw';
     startStream();
   });
   // Periodic retry: when the stream is down (e.g. camera node not yet
@@ -35,7 +37,10 @@ export function initCamera() {
 // ── Build stream URL ───────────────────────────────────────────────────────
 function streamUrl() {
   const [w, h] = resolution.split('x');
-  return `http://${HOST}:${PORTS.video}/stream?` +
+  // CV feeds come from the GPU PC's web_video_server; raw feeds from the Pi's
+  const host = (cvMode && CV_HOST) ? CV_HOST : HOST;
+  const port = (cvMode && CV_HOST) ? CV_PORT : PORTS.video;
+  return `http://${host}:${port}/stream?` +
     `topic=${topic}&quality=${quality}&width=${w}&height=${h}&type=mjpeg`;
 }
 

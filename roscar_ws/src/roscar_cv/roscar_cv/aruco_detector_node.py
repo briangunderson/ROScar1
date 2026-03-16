@@ -51,6 +51,25 @@ class ArucoDetectorNode(Node):
         dict_id = ARUCO_DICTS.get(dict_name, cv2.aruco.DICT_4X4_50)
         self.aruco_dict = cv2.aruco.getPredefinedDictionary(dict_id)
         self.aruco_params = cv2.aruco.DetectorParameters()
+
+        # Tuned for longer range and wider viewing angles:
+        # - Lower min marker perimeter to detect smaller (distant) markers
+        self.aruco_params.minMarkerPerimeterRate = 0.01  # default 0.03
+        # - Increase adaptive threshold window for uneven lighting
+        self.aruco_params.adaptiveThreshWinSizeMin = 3   # default 3
+        self.aruco_params.adaptiveThreshWinSizeMax = 53  # default 23
+        self.aruco_params.adaptiveThreshWinSizeStep = 5  # default 10
+        # - Relax corner refinement for skewed views
+        self.aruco_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+        self.aruco_params.cornerRefinementWinSize = 5    # default 5
+        self.aruco_params.cornerRefinementMinAccuracy = 0.05  # default 0.1
+        self.aruco_params.cornerRefinementMaxIterations = 50  # default 30
+        # - Lower perspective removal threshold for more skewed markers
+        self.aruco_params.perspectiveRemoveIgnoredMarginPerCell = 0.2  # default 0.13
+        # - More tolerant bit extraction for partially occluded/blurry markers
+        self.aruco_params.maxErroneousBitsInBorderRate = 0.5  # default 0.35
+        self.aruco_params.errorCorrectionRate = 0.8  # default 0.6
+
         self.detector = cv2.aruco.ArucoDetector(self.aruco_dict, self.aruco_params)
 
         self.bridge = CvBridge()
@@ -108,12 +127,25 @@ class ArucoDetectorNode(Node):
 
             # Pose estimation (requires camera intrinsics)
             if self.camera_matrix is not None:
-                rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
-                    corners, self.marker_size, self.camera_matrix, self.dist_coeffs
-                )
+                # estimatePoseSingleMarkers removed in OpenCV 4.8+;
+                # use solvePnP per marker with the known square corners.
+                half = self.marker_size / 2.0
+                obj_points = np.array([
+                    [-half,  half, 0],
+                    [ half,  half, 0],
+                    [ half, -half, 0],
+                    [-half, -half, 0],
+                ], dtype=np.float32)
+
                 for i, marker_id in enumerate(ids.flatten()):
-                    rvec = rvecs[i][0]
-                    tvec = tvecs[i][0]
+                    ok, rvec, tvec = cv2.solvePnP(
+                        obj_points, corners[i][0],
+                        self.camera_matrix, self.dist_coeffs,
+                    )
+                    if not ok:
+                        continue
+                    rvec = rvec.flatten()
+                    tvec = tvec.flatten()
 
                     # Draw axis on debug image
                     cv2.drawFrameAxes(

@@ -45,4 +45,15 @@ def generate_launch_description():
             output='screen',
             condition=IfCondition(LaunchConfiguration('use_yolo')),
         ),
+
+        # ── Web Video Server (serves annotated streams from this PC) ──
+        # Runs on port 8081 to avoid conflict with Pi's web_video_server on 8080.
+        # The dashboard fetches CV feeds directly from this server.
+        Node(
+            package='web_video_server',
+            executable='web_video_server',
+            name='cv_video_server',
+            parameters=[{'port': 8081}],
+            output='screen',
+        ),
     ])

@@ -8,6 +8,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/SetMode.srv"
   "srv/SaveMap.srv"
   "srv/GetStatus.srv"
+  "srv/ListMaps.srv"
 )
 
 ament_package()

@@ -184,6 +184,21 @@ html, body {
 .text-input-sm:focus { border-color: var(--primary); }
 .text-input-sm::placeholder { color: var(--text-dim); }
 
+/* ── Small Select ──────────────────────────────────── */
+.select-sm {
+  background: var(--bg3); border: 1px solid var(--border2);
+  color: var(--text-hi); font-family: var(--mono); font-size: 10px;
+  padding: 3px 6px; flex: 1; outline: none;
+  cursor: pointer; transition: border-color .15s;
+  -webkit-appearance: none; appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%234A6A80'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  padding-right: 18px;
+}
+.select-sm:focus { border-color: var(--primary); }
+.select-sm option { background: var(--bg2); color: var(--text-hi); }
+
 /* ── Status Message ─────────────────────────────────── */
 .status-msg { font-size: 9px; min-height: 12px; margin-top: 2px; }
 .status-msg.ok  { color: var(--green); }
