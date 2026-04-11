@@ -14,6 +14,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
 
 
 def generate_launch_description():
@@ -51,8 +52,22 @@ def generate_launch_description():
         }.items(),
     )
 
+    # -- Landmark localizer (ArUco marker drift correction) --
+    driver_dir = get_package_share_directory('roscar_driver')
+    landmark_node = Node(
+        package='roscar_driver',
+        executable='landmark_localizer',
+        name='landmark_localizer',
+        parameters=[
+            os.path.join(driver_dir, 'config', 'landmark_params.yaml'),
+            {'load_learned': True},  # Reuse learned markers from SLAM session
+        ],
+        output='screen',
+    )
+
     return LaunchDescription([
         map_arg,
         robot_launch,
         nav2_launch,
+        landmark_node,
     ])
