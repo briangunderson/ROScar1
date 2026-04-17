@@ -117,8 +117,18 @@ import os
 #                         black (35,37,42) from rev13 blended with Fusion's
 #                         dark blue background; upper rails + posts + mast
 #                         were invisible.
+#   rev16   2026-04-17  Give up matching physical black stock for CAD view.
+#                       Dark frame colors (black, graphite) consistently
+#                       blend with Fusion's viewport and make structural
+#                       elements look absent. Switched to bright anodized
+#                       aluminum silver (175,180,190) for the frame so rails,
+#                       posts, and mast read clearly from any angle. Darker
+#                       silver (130,135,148) for corner brackets so they
+#                       remain distinguishable from the aluminum rails.
+#                       Physical-color matching can be done via Fusion
+#                       appearance overrides for presentation renders.
 # =============================================================================
-VERSION = 'rev15'
+VERSION = 'rev16'
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Dimensions (cm) — multiply mm by 0.1
@@ -154,12 +164,13 @@ N_SEGS = 6;  SEG_GAP_RATIO = 0.12;  DIAG_SHIFT = 0.15  # cm shift per segment
 # Color palette
 # ═══════════════════════════════════════════════════════════════════════════
 PAL = {
-    # rev14: frame color compromises between "matches physical black stock"
-    # and "visible against Fusion's dark blue viewport background". Pure black
-    # (35,37,42) blended into the shadows making upper rails and posts look
-    # absent. This is a dark graphite — still reads as black anodized metal,
-    # but with enough value to show edges in the viewport.
-    'frame':    (95, 100, 110),    # dark graphite (anodized black aluminum)
+    # rev16: frame color abandoned the "matches physical black stock" goal
+    # and went full aluminum silver. In the viewport, dark colors blended
+    # into shadows and users reported parts looking 'missing' or 'floating'.
+    # The CAD model is a DESIGN tool; matching physical color can be done
+    # manually via appearance overrides for presentation renders. For working
+    # in Fusion, bright anodized aluminum gives the clearest structural read.
+    'frame':    (175, 180, 190),   # bright anodized aluminum silver
     'plate':    (215, 180, 120),   # warm tan acrylic / amber G10
     'battery':  (40, 95, 175),     # battery blue
     'pcb':      (35, 90, 55),      # PCB green
@@ -170,8 +181,8 @@ PAL = {
     'roller':   (55, 58, 65),      # roller darker gray
     'lidar':    (30, 30, 38),      # lidar dark
     'camera':   (50, 50, 58),      # camera body
-    'bracket':  (230, 120, 30),    # orange (motor L-brackets) — pops against black frame
-    'corner':   (175, 180, 190),   # silver/raw-aluminum 3-way corner brackets
+    'bracket':  (230, 120, 30),    # orange (motor L-brackets) — pops against frame
+    'corner':   (130, 135, 148),   # slightly darker silver so corner brackets are distinguishable from aluminum rails
     'ground':   (85, 90, 98),      # warm gray floor
     'hub':      (135, 140, 150),   # wheel hub
     'standoff': (185, 190, 200),   # standoffs silver-ish
