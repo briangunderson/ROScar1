@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Implemented as rev9, revised as rev10 (see rev10 addendum at bottom).
+
 **Goal:** Replace procedural geometry in `roscar_v2_chassis.py` with real STEP model imports for 3030 extrusions, 3-way corner brackets, and T-plate brackets.
 
 **Architecture:** Add a STEP import helper that loads models from `docs/chassis/models/`, positions them with Matrix3D transforms, and optionally scales extrusion bodies to the correct length. The existing procedural primitives (B, CZ, CY) remain for electronics, motors, wheels, wiring, and ground plane. The `_frame()` function is rewritten to use imported geometry.
@@ -344,3 +346,46 @@ Electronics, motors, wheels, plates, wiring remain procedural."
 3. **Bracket rotation wrong**: The 4 corner rotations (0, -90, +90, 180 around Z) are derived from which direction the bracket arms need to point. If a bracket is rotated wrong, swap the angle. This is a quick iteration.
 
 4. **Performance**: 13 STEP imports + 8 bracket imports = 21 import operations. Each takes ~0.5-1s in Fusion 360. Total import time ~10-20s, acceptable for a setup script.
+
+---
+
+## Rev10 Addendum — Fixes and Optimizations
+
+After rev9 was committed, re-review surfaced three real issues plus one unverified assumption. Rev10 addresses all of them in a single follow-up commit.
+
+### 1. Upper-deck bracket Z-arm was pointing UP (bug)
+
+**Problem:** `_frame_corners()` used the same rotation matrix for lower and upper deck brackets. The STEP bracket has arms along +X, +Y, +Z. At upper corners the Z arm should point **down** (into the post below), not up.
+
+**Fix:** Replaced the angle-based `corners` table with an 8-entry placement table that gives each corner an explicit 3x3 rotation (column vectors). Upper-deck entries swap X/Y assignment in addition to flipping Z, preserving determinant +1 (proper rotation) while getting the arms to the right world directions.
+
+### 2. Transform composition via `transformBy` was ambiguous (potential bug)
+
+**Problem:** `_place()` built the transform as `rotation.transformBy(translation)`. Fusion 360's API docs don't clearly specify whether this pre-multiplies or post-multiplies, which would flip the order of rotate-then-translate vs. translate-then-rotate.
+
+**Fix:** Replaced the chained `transformBy` with an explicit row-major matrix build via `setWithArray`. The helper `_mat(c0, c1, c2, t)` takes the three rotation column vectors and a translation tuple, producing an unambiguous transform matrix. No composition order to get wrong.
+
+### 3. 22 STEP imports was wasteful (performance)
+
+**Problem:** Each rail/bracket/tplate was imported as a fresh STEP. 22 imports at ~1-2s each = 30-45s per script run.
+
+**Fix:** Use `rootComp.occurrences.addExistingComponent(component, transform)` for instance reuse. Each unique part variant (long rail 248mm, short rail 188mm, post 100mm, mast 120mm, bracket, T-plate) is imported ONCE as a template. Additional placements are created as instances sharing the same geometry. Total STEP imports drop from 22 to 6 (~4x speedup).
+
+### 4. `occurrence.transform` was being set on nested occurrences (latent bug)
+
+**Problem:** rev9 imported into a `'1 - Frame'` sub-component, then set `occurrence.transform`. Fusion 360 API docs say `transform` can only be set when the occurrence's parent is the active edit target — root at script start. Nested occurrences would silently fail to position.
+
+**Fix:** Import frame elements directly into root. The `'1 - Frame'` sub-component is gone; rails, posts, mast, brackets, and T-plate appear at root level in the browser tree. Other sub-components (plates, electronics, drive, wiring, ground) keep their sub-component grouping since they use procedural primitives rather than imports.
+
+### 5. Robustness improvements
+
+- **STEP file existence check** at the start of `_frame()`: fails fast with a clear error message if any model file is missing, rather than producing a partially-built frame.
+- **Bounding-box sanity check** via `_check_centered()`: after importing the first rail, verifies the cross-section is centered at origin (±0.1cm). If off-center, logs a warning — all the hs offset math would be wrong and every rail/post misaligned.
+
+### Rev10 code structure changes
+
+- `_place()` replaced by `_place_occ(occ, c0, c1, c2, t)` and `_mat(c0, c1, c2, t)`
+- `_scale_y(occ, ...)` renamed to `_scale_body_y(comp, factor)` (takes component directly)
+- New helpers: `_instance()`, `_check_centered()`
+- Frame sub-functions (`_frame_rails`, `_frame_posts`, etc.) collapsed into one `_frame()` with commented sections — easier to follow the import-scale-place flow
+- New standard-basis constants `_X, _Y, _Z, _NX, _NY, _NZ` for readable transform tables
