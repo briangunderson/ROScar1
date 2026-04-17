@@ -254,29 +254,62 @@ Each of the 8 frame corners (4 lower, 4 upper) also has a vertical post. The **3
 
 ### 4.6 Cut Plan
 
-**Kerf allowance:** A miter saw blade removes ~2-3mm per cut. All cut lengths below account for this. When cutting two pieces from one stick, the total consumed is piece1 + kerf + piece2.
+> **Verified against the Fusion 360 CAD model (`docs/chassis/fusion360/roscar_v2_chassis.py`, rev11+) on 2026-04-17.** Rail lengths and positions in the CAD match this table exactly.
+
+**Joinery style:** Box-joint with 3-way corner brackets. Front and rear rails (along Y axis) span the **full frame width** with their cross-sections at the outer corners. Left and right rails (along X axis) are **shorter** and fit *between* the front and rear rails. Corner brackets sit at the inside of the frame corners, clamping the two horizontal rails + the vertical post at each junction.
+
+```
+Looking down at the frame (top view):
+    ┌─────── FRONT (248mm) ───────┐    
+    │                             │    The F/R rails span the
+    │                             │    full 248mm frame side.
+    │   LEFT           RIGHT      │    
+    │  (188mm)        (188mm)     │    The L/R rails are 188mm
+    │                             │    (= 248 − 2×30 for the
+    │                             │    front and rear rail
+    └─────── REAR  (248mm) ───────┘    cross-sections).
+```
+
+**Frame outer dimension:** 248mm × 248mm (equal to the Front/Rear rail length).
+
+**Kerf allowance:** A miter saw blade removes ~2–3mm per cut. All cut lengths below account for this.
 
 **Stock used:**
 
-| Source Stock | Cut Into | Kerf Loss | Remainder | Purpose |
-|-------------|----------|-----------|-----------|---------|
-| 4× 500mm black 3030 | 2× 248mm each | ~3mm | ~1mm waste | Frame perimeter rails (4 lower + 4 upper) |
-| 1× 400mm black 3030 | 3× 100mm | ~9mm (3 cuts) | ~91mm spare | Vertical corner posts (3 of 4) |
-| 1× 400mm black 3030 | 1× 100mm + 1× 120mm | ~6mm (2 cuts) | ~174mm spare | 4th vertical post + lidar mast |
+| Stock in | Cut Into | Qty out | Kerf loss | Remainder | Purpose |
+|----------|----------|---------|-----------|-----------|---------|
+| 2× 500mm black 3030 | 2× 248mm each | **4× 248mm** | ~4mm/stick | ~0mm waste | **Front/Rear rails** (2 lower + 2 upper) |
+| 2× 400mm black 3030 | 2× 188mm each | **4× 188mm** | ~4mm/stick | ~20mm waste | **Left/Right rails** (2 lower + 2 upper) |
+| 1× 400mm black 3030 | 3× 100mm | **3× 100mm** | ~9mm (3 cuts) | ~91mm spare | Vertical corner posts (3 of 4) |
+| 1× 400mm black 3030 | 1× 100mm + 1× 120mm | **1× 100mm + 1× 120mm** | ~6mm (2 cuts) | ~174mm spare | 4th vertical post + lidar mast |
 
-**Note:** Frame rails are 248mm after kerf (vs. 250mm nominal). This 2mm difference is negligible — the frame outer dimension becomes 248+30+30 = 308mm... wait, no. The rail length IS the frame side length, not an additive dimension. A 248mm rail gives a frame outer dimension of 248+30 = 278mm (if rails butt into each other) or 248mm (if using blind joints). The exact joint method determines the final frame size. With 3-way corner brackets, the rails typically butt against the post face, so the frame outer dimension is approximately 248mm per side. **This is close enough — final frame squareness is set during assembly, not by cut precision.**
+**Tolerance:** Target ±1mm on all cuts. After cutting, measure each piece and match pairs of equal length to opposing sides of the frame. During assembly, measure both diagonals on each deck — they should be equal within 2mm to verify squareness.
 
-**Tolerance:** Target ±1mm on all cuts. After cutting all 8 frame rails, measure them and match pairs of equal length for opposing sides. Measure diagonals during assembly (should be equal within 2mm) to verify squareness.
+**Label every piece as you cut it.** Suggested marking (Sharpie on the end that won't be visible):
+
+| Label | Qty | Length | Destination |
+|-------|-----|--------|-------------|
+| `F-Lo` | 1 | 248mm | Lower deck, front rail (low X) |
+| `F-Hi` | 1 | 248mm | Upper deck, front rail (low X) |
+| `R-Lo` | 1 | 248mm | Lower deck, rear rail (high X) |
+| `R-Hi` | 1 | 248mm | Upper deck, rear rail (high X) |
+| `L-Lo` | 1 | 188mm | Lower deck, left rail (low Y) |
+| `L-Hi` | 1 | 188mm | Upper deck, left rail (low Y) |
+| `Ri-Lo` | 1 | 188mm | Lower deck, right rail (high Y) |
+| `Ri-Hi` | 1 | 188mm | Upper deck, right rail (high Y) |
+| `P-FL` / `P-FR` / `P-RL` / `P-RR` | 4 | 100mm | Vertical corner posts |
+| `M` | 1 | 120mm | Lidar mast |
 
 **Stock preserved (untouched):**
 
 | Stock | Qty | Notes |
 |-------|-----|-------|
-| 400mm black 3030 | 2 | Future expansion (cross bracing, arm mount, etc.) |
-| 600mm black 3030 | 4 | Future expansion |
+| 500mm black 3030 | 2 | Future expansion |
+| 400mm black 3030 | 0 | All 4× 400mm sticks consumed above |
+| 600mm black 3030 | 4 | Future expansion (cross bracing, arm mount, etc.) |
 | 1000mm silver 3030 | 4 | Future expansion (larger robot, test fixtures) |
 
-**Total cuts:** 11 pieces from 6 sticks. All cuts are straight 90° on the miter saw.
+**Total cuts:** 13 pieces from 6 sticks. All cuts are straight 90° on the miter saw.
 
 ### 4.7 Hardware Bill of Materials
 

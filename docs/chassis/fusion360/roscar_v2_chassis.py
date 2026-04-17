@@ -67,8 +67,25 @@ import os
 #                         USB→Pi (via mast+rail), camera USB→Pi
 #                       - Added _mecanum_wheel() and _move_body_transform()
 #                         helpers for the slanted roller geometry.
+#   rev13   2026-04-17  Structural focus — Brian is cutting extrusions today,
+#                       so strip procedural noise and verify the frame geometry
+#                       matches the cut plan:
+#                       - Non-structural components downgraded to simple shapes
+#                         (battery/board/pi5/lidar/camera): dropped standoff+bolt
+#                         stacks, port bumps, strap bands, wire leads, cable runs
+#                       - KEPT (structural/connector): 3030 frame STEP imports,
+#                         3-way corner brackets, T-plate, deck plates+bolts,
+#                         motor L-brackets+bolts, lidar mount plate+screws,
+#                         mecanum wheels
+#                       - Wiring stripped entirely (will come back after real
+#                         component STEPs are imported with real port positions)
+#                       - Cut plan in design spec reconciled to match the
+#                         script geometry (4x 248mm + 4x 188mm, was wrongly
+#                         claiming all 8 rails at 248mm). See
+#                         docs/superpowers/specs/2026-04-04-extrusion-chassis-
+#                         design.md §4.6 and tasks/chassis-v2-cut-sheet.md.
 # =============================================================================
-VERSION = 'rev12'
+VERSION = 'rev13'
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Dimensions (cm) — multiply mm by 0.1
@@ -284,7 +301,7 @@ def run(context):
         msg = (f'ROScar1 v2 ({VERSION})\n'
                f'Frame: {FRAME*10:.0f}mm | Track: {trk*10:.0f}mm\n'
                f'WB: {HWB*20:.0f}mm | H: {(MST+MAST_H+LID_H)*10:.0f}mm\n'
-               f'Engineering detail pass — standoffs, fasteners, cable runs')
+               f'Cut plan: 4x248mm + 4x188mm + 4x100mm posts + 1x120mm mast')
         if _clog: msg += f'\nLog: {_clog[0]}'
         ui.messageBox(msg)
     except:
@@ -530,113 +547,61 @@ def _standoffs(rc):
 # Components
 # ═══════════════════════════════════════════════════════════════════════════
 def _components(rc):
-    """Major electronics and sensors with visible mounting hardware (rev12).
+    """Non-structural components as simple placeholders (rev13).
 
-    Every component shows HOW it attaches to the chassis:
-      - Battery: retention strap wrapping around top
-      - Motor board: 4 standoffs lifting PCB off deck + bolt heads
-      - RPi5 (Argon case): 4 standoffs + bolts + ports/fan for realism
-      - Lidar: dedicated mount plate between mast and lidar base with 4 screws
-      - Camera: bracket clamping over front rail with bolts on both sides
-    Plus the engineering details — USB/HDMI ports, headers, fan disc, cable
-    exit — that make it read as a real computer and not just a black block.
+    User directive: "a simple shape representing the raspi, lidar, motor board,
+    etc is fine at this stage". Focus is on getting the FRAME right for
+    fabrication — detailed electronics can be added back once we have real
+    STEP models from GrabCAD/manufacturers.
+
+    Kept: bounding-box representations so the components occupy realistic
+    space and clash detection still works. Dropped: all fake SMD/port/header
+    detail, battery strap, cable leads — these were procedural guesses that
+    look worse than real CAD.
+
+    Kept: lidar mount plate (this IS a connector between mast and lidar —
+    the user explicitly listed connectors as important).
     """
     c = FRAME/2;  cz = LO + S + PLT_T
 
-    # ── Battery with retention strap ────────────────────────────────────
+    # Battery — simple box on lower deck
     B(rc, 'Battery', c-BAT[0]/2, c-BAT[1]/2, cz, BAT[0], BAT[1], BAT[2], 'battery')
-    # Velcro strap wrapping over the top (two side panels + top band)
-    strap_t = 0.15    # 1.5mm thick
-    strap_w = 1.5     # 15mm wide band
-    sy = c - strap_w/2
-    B(rc, 'BatStrap_top',
-      c-BAT[0]/2-0.2, sy, cz+BAT[2], BAT[0]+0.4, strap_w, strap_t, 'bracket')
-    B(rc, 'BatStrap_L',
-      c-BAT[0]/2-0.2, sy, cz, strap_t, strap_w, BAT[2], 'bracket')
-    B(rc, 'BatStrap_R',
-      c+BAT[0]/2+0.2-strap_t, sy, cz, strap_t, strap_w, BAT[2], 'bracket')
-    # Battery wire leads (+/- from one end toward motor board)
-    B(rc, 'BatWire+', c+BAT[0]/2, c-0.15, cz+BAT[2]*0.7, 1.5, 0.15, 0.15, 'wire_pwr')
-    B(rc, 'BatWire-', c+BAT[0]/2, c+0.15, cz+BAT[2]*0.7, 1.5, 0.15, 0.15, 'wire_usb')
 
-    # ── Motor board on standoffs + ports/headers ────────────────────────
+    # Motor board — plain PCB block on lower deck
     bx = FRAME * 0.7
-    so_h = 0.6  # 6mm standoffs lift PCB off the deck plate
-    # 4 brass-color standoffs at board corners
-    for sx, sy in [(bx-BRD[0]/2+0.4, c-BRD[1]/2+0.4),
-                    (bx+BRD[0]/2-0.4, c-BRD[1]/2+0.4),
-                    (bx-BRD[0]/2+0.4, c+BRD[1]/2-0.4),
-                    (bx+BRD[0]/2-0.4, c+BRD[1]/2-0.4)]:
-        CZ(rc, 'MB_StO', sx, sy, cz, 0.18, so_h, 'standoff')
-        # Bolt head visible on top of each standoff, through the PCB
-        CZ(rc, 'MB_Bolt', sx, sy, cz+so_h+BRD[2], 0.22, 0.15, 'bracket')
-    # PCB itself sits on top of the standoffs
-    B(rc, 'MotorBoard', bx-BRD[0]/2, c-BRD[1]/2, cz+so_h, BRD[0], BRD[1], BRD[2], 'pcb')
-    # USB-C port on the side (power + data to Pi)
-    B(rc, 'Board_USB', bx-BRD[0]/2-0.2, c-0.4, cz+so_h+BRD[2], 0.9, 0.8, 0.35, 'port')
-    # Motor connector headers (4 columns — one per motor)
-    for i in range(4):
-        B(rc, f'Hdr_{i}', bx+BRD[0]/2-0.3, c-BRD[1]/2+0.8+i*1.2,
-          cz+so_h+BRD[2], 0.3, 0.8, 0.5, 'wire_enc')
+    B(rc, 'MotorBoard', bx-BRD[0]/2, c-BRD[1]/2, cz, BRD[0], BRD[1], BRD[2], 'pcb')
 
-    # ── RPi5 (Argon NEO case) on standoffs ──────────────────────────────
+    # RPi5 in Argon NEO case — plain case block on upper deck
     rz = HI + S + PLT_T
-    # 4 standoffs at the Pi's mounting hole pattern (~58x49mm)
-    for sx in [c-RPI[0]/2+0.6, c+RPI[0]/2-0.6]:
-        for sy in [c-RPI[1]/2+0.6, c+RPI[1]/2-0.6]:
-            CZ(rc, 'Pi_StO', sx, sy, rz, 0.2, so_h, 'standoff')
-            CZ(rc, 'Pi_Bolt', sx, sy, rz+so_h, 0.25, 0.15, 'bracket')
-    # Argon NEO case
-    B(rc, 'RPi5', c-RPI[0]/2, c-RPI[1]/2, rz+so_h, RPI[0], RPI[1], RPI[2], 'rpi')
-    # Fan / vent on top
-    CZ(rc, 'RPi_Fan', c, c, rz+so_h+RPI[2], 1.5, 0.15, 'hub')
-    # USB + Ethernet + HDMI ports on back face
-    px = c + RPI[0]/2
-    rzp = rz + so_h
-    B(rc, 'USB_A1',   px, c-RPI[1]/2+0.5, rzp+0.8, 0.3, 1.4, 0.7, 'port')
-    B(rc, 'USB_A2',   px, c-RPI[1]/2+2.2, rzp+0.8, 0.3, 1.4, 0.7, 'port')
-    B(rc, 'Ethernet', px, c-RPI[1]/2+4.0, rzp+0.3, 0.3, 1.6, 1.3, 'port')
-    B(rc, 'HDMI1',    px, c+RPI[1]/2-2.5, rzp+1.5, 0.3, 0.8, 0.35, 'port')
-    B(rc, 'HDMI2',    px, c+RPI[1]/2-1.2, rzp+1.5, 0.3, 0.8, 0.35, 'port')
+    B(rc, 'RPi5', c-RPI[0]/2, c-RPI[1]/2, rz, RPI[0], RPI[1], RPI[2], 'rpi')
 
-    # ── RPLIDAR C1 on a proper mount plate ──────────────────────────────
+    # ── Lidar mount plate (connector between mast and lidar) ────────────
     lcx, lcy = FRAME-S, FRAME/2
     mp_t = 0.4                 # 4mm mount plate
     mp_sz = LID_SZ + 1.0       # slightly larger than lidar footprint
     mp_z = MST + MAST_H        # sits on top of mast
-    # Mount plate (aluminum disc with 4 screw holes — shown as bolt heads)
     B(rc, 'Lidar_MntPlate',
       lcx-mp_sz/2, lcy-mp_sz/2, mp_z, mp_sz, mp_sz, mp_t, 'corner')
+    # 4 M2.5 screws holding lidar to mount plate (these ARE fasteners)
     for dx, dy in [(-LID_SZ/2*0.7, -LID_SZ/2*0.7),
                     ( LID_SZ/2*0.7, -LID_SZ/2*0.7),
                     (-LID_SZ/2*0.7,  LID_SZ/2*0.7),
                     ( LID_SZ/2*0.7,  LID_SZ/2*0.7)]:
         CZ(rc, 'Lidar_Screw', lcx+dx, lcy+dy, mp_z+mp_t, 0.18, 0.15, 'bracket')
-    # Lidar sits on the mount plate
+
+    # Lidar — simple base + head
     lz = mp_z + mp_t
     bh = LID_H * 0.35;  hh = LID_H * 0.65
     B(rc, 'Lidar_Base', lcx-LID_SZ/2, lcy-LID_SZ/2, lz, LID_SZ, LID_SZ, bh, 'lidar')
     CZ(rc, 'Lidar_Head', lcx, lcy, lz+bh, LID_SZ/2*0.9, hh, 'lidar')
-    try: CZ(rc, 'Lidar_Lens', lcx+LID_SZ/2*0.7, lcy, lz+bh+hh*0.3, 0.3, 0.1, 'lens')
-    except: pass
-    # Cable exit nub (goes to USB cable run)
-    B(rc, 'Lidar_Cable', lcx-LID_SZ/2-0.8, lcy-0.15, lz+bh*0.3, 0.8, 0.3, 0.3, 'wire_usb')
 
-    # ── Camera with clamp-over-rail mount bracket ───────────────────────
+    # Camera — simple body + lens, single mounting clip
     cam_z = HI + S/2
-    # Body with lens and lens ring
     B(rc, 'Cam_Body', -0.5, c-3.5, cam_z, 2.5, 7.0, 2.5, 'camera')
     try: CZ(rc, 'Cam_Lens', 0.5, c, cam_z+0.8, 0.8, 0.8, 'lens')
-    except: pass
-    try: CZ(rc, 'Cam_Ring', 0.5, c, cam_z+1.5, 0.9, 0.15, 'hub')
-    except: pass
-    # Mounting bracket: clamp that wraps OVER the top of the front rail
-    # Top arm sits above rail, bottom arm below, vertical web between them
-    B(rc, 'Cam_Clip_top', -0.3, c-2.0, cam_z+2.5, 1.0, 4.0, 0.5, 'bracket')
-    B(rc, 'Cam_Clip_bot', -0.3, c-2.0, cam_z-0.5, 1.0, 4.0, 0.5, 'bracket')
-    B(rc, 'Cam_Clip_web', -0.3, c-2.0, cam_z-0.5, 0.3, 4.0, 3.5, 'bracket')
-    # Clamping bolt (visible from top)
-    CZ(rc, 'Cam_Clip_bolt', 0.2, c, cam_z+3.0, 0.2, 0.25, 'bracket')
+    except Exception: pass
+    # Single clamp-over-rail bracket (just the top arm — simplified)
+    B(rc, 'Cam_Clip', -0.3, c-2.0, cam_z+2.5, 1.0, 4.0, 0.8, 'bracket')
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Drive: motors, wheels, brackets
@@ -773,7 +738,11 @@ def _motor_assy(rc, tag, mx, fy, od):
     try: CY(rc, f'Shaft_{tag}', mx, shaft_start, AXL, SHAFT_D/2, SHAFT, 'hub')
     except Exception: pass
 
-    # L-bracket clamping motor to the outer face of the lower-deck rail
+    # L-bracket clamping motor to the outer face of the lower-deck rail.
+    # This IS a "connector" per the user's structural-focus guidance, so keep
+    # both plates plus the visible mounting bolts. (Encoder PCB removed — it's
+    # a non-structural detail that will come back when we have a real motor
+    # STEP model with the encoder already integrated.)
     bk_top = LO
     bk_bot = AXL - M_DIA/2 - 0.1
     bk_h = bk_top - bk_bot
@@ -781,74 +750,30 @@ def _motor_assy(rc, tag, mx, fy, od):
         bk_y = fy - BRKT_T if od < 0 else fy
         # Vertical plate — mounts to the rail's outer T-slot face
         B(rc, f'BrkV_{tag}', mx-S/3, bk_y, bk_bot, S*2/3, BRKT_T, bk_h, 'bracket')
-        # Horizontal shelf under the motor, bolted up into the motor housing
+        # Horizontal shelf under the motor
         shelf_y = fy - M_CAN*0.6 if od < 0 else fy
         B(rc, f'BrkH_{tag}', mx-S/3, shelf_y, bk_bot-BRKT_T,
           S*2/3, M_CAN*0.6, BRKT_T, 'bracket')
-        # Mounting bolts: 2 through the vertical plate into the rail's T-nut
-        # (heads visible on the outboard side of the plate)
+        # 2 bolts through the vertical plate into the rail's T-nut
         bolt_side = bk_y - 0.15 if od < 0 else bk_y + BRKT_T + 0.15
         for bz in [bk_bot + bk_h*0.3, bk_bot + bk_h*0.7]:
-            # X-direction cylinder for a horizontal bolt shaft through the plate
-            # Use CZ but that's vertical — approximate with a small box instead
             B(rc, f'Bolt_V_{tag}_{bz:.1f}',
               mx-0.2, bolt_side-0.05 if od<0 else bolt_side,
               bz-0.2, 0.4, 0.2, 0.4, 'bracket')
-        # Shelf-to-motor bolt (single, centered under motor)
+        # 1 bolt up through the shelf into the motor housing
         CZ(rc, f'Bolt_H_{tag}', mx, shelf_y+M_CAN*0.3 if od>0 else shelf_y-M_CAN*0.3,
            bk_bot-BRKT_T-0.1, 0.18, 0.2, 'bracket')
-        # Encoder PCB on inboard end of motor (restored from rev11)
-        enc_y = fy - 0.3 if od < 0 else fy + 0.1
-        try: CY(rc, f'Enc_{tag}', mx, enc_y, AXL, M_DIA/2*0.8, 0.2, 'encoder')
-        except Exception: pass
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Wiring
 # ═══════════════════════════════════════════════════════════════════════════
 def _wiring(rc):
-    """Cable runs that actually connect components to each other.
-
-    Each wire starts at a visible port on one component and ends at a visible
-    port on another — shows the data/power topology of the robot.
+    """Wiring removed in rev13 — we'll add realistic cable runs once the
+    electronics have real STEP models (from GrabCAD / manufacturers) with
+    actual port positions to route to. The '6 - Wiring' sub-component is
+    left as a no-op placeholder.
     """
-    c = FRAME/2
-    bx = FRAME * 0.7           # motor board X center (matches _components)
-    cz_board = LO + S + PLT_T + 0.6    # PCB top (after standoffs)
-
-    # Power: battery (+/-) to motor board XT60 (dual red + black bundle)
-    # Run from battery side toward the motor board's side
-    pwr_len = bx - BRD[0]/2 - (c + BAT[0]/2)
-    B(rc, 'PwrCable+', c+BAT[0]/2, c-0.3, cz_board+0.3, pwr_len, 0.2, 0.2, 'wire_pwr')
-    B(rc, 'PwrCable-', c+BAT[0]/2, c+0.3, cz_board+0.3, pwr_len, 0.2, 0.2, 'wire_usb')
-
-    # USB-C: motor board → up rear post → across upper rail → RPi5 USB-A
-    # Leg 1: vertical run up the rear-inside post
-    post_x = FRAME - S - 0.4   # just inside the rear rail
-    B(rc, 'USB_vert', post_x, c-0.15, LO+S, 0.25, 0.3, POST_H, 'wire_usb')
-    # Leg 2: horizontal on top of upper deck toward Pi
-    horiz_len = post_x - (c + RPI[0]/2 + 0.3)
-    B(rc, 'USB_horiz',
-      c+RPI[0]/2+0.3, c-0.15, HI+S+PLT_T+0.7, horiz_len, 0.3, 0.25, 'wire_usb')
-
-    # Lidar USB: lidar cable exit → down mast → along upper rail → down post → Pi
-    # Leg 1: down the mast (matching lidar cable exit side)
-    mast_x = FRAME - S - 0.3
-    lidar_top_z = MST + MAST_H
-    B(rc, 'LidarUSB_mast',
-      mast_x, c+0.4, HI+S+PLT_T, 0.25, 0.25, lidar_top_z - (HI+S+PLT_T), 'wire_usb')
-    # Leg 2: along upper rail toward Pi
-    B(rc, 'LidarUSB_rail',
-      S+0.2, c+0.4, HI+S+PLT_T+0.4, FRAME - 2*S - 0.5, 0.25, 0.25, 'wire_usb')
-
-    # Camera USB: short run from camera back to Pi front-left port
-    cam_z = HI + S/2
-    B(rc, 'CamUSB',
-      2.0, c-3.0, cam_z+2.8, c-RPI[0]/2-2.0, 0.2, 0.2, 'wire_usb')
-
-    # Cable tie loops — 4 small black bands on upper rail to route wires
-    for x in [S+3, S+7, S+11, S+15]:
-        B(rc, f'Tie_{x:.0f}',
-          x, c+0.25, HI+S+PLT_T+0.1, 0.15, 0.5, 0.6, 'wheel')
+    pass
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Ground

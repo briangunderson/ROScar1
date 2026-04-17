@@ -1,7 +1,7 @@
 # Chassis v2 Design — Session Handoff
 
-**Date:** 2026-04-11 (updated)
-**Status:** Fusion 360 model rev10 (STEP imports) ready to test, design spec complete, 3D models in repo
+**Date:** 2026-04-17 (updated)
+**Status:** Fusion 360 model rev13 — frame verified in Fusion, ready to cut aluminum stock. Non-structural components are simple placeholders until real component STEPs are sourced.
 
 ## What We're Doing
 
@@ -13,12 +13,13 @@ Designing a new aluminum extrusion chassis (v2) to replace the robot's current m
 
 | Document | Path | Status |
 |----------|------|--------|
-| Design spec | `docs/superpowers/specs/2026-04-04-extrusion-chassis-design.md` | Complete, reviewed |
-| Implementation plan (rev8 mockup) | `docs/superpowers/plans/2026-04-04-fusion360-chassis-mockup.md` | Written — predates rev9/rev10 STEP import work |
-| STEP import plan (rev9/rev10) | `docs/superpowers/plans/2026-04-11-step-import-chassis.md` | Complete with rev10 addendum |
-| Fusion 360 script | `docs/chassis/fusion360/roscar_v2_chassis.py` | **rev10 — NEEDS TESTING in Fusion 360** |
+| Design spec | `docs/superpowers/specs/2026-04-04-extrusion-chassis-design.md` | Complete; cut plan reconciled to match CAD 2026-04-17 |
+| **Cut sheet (saw-ready)** | `tasks/chassis-v2-cut-sheet.md` | Printable reference for cutting the extrusions |
+| Implementation plan (rev8 mockup) | `docs/superpowers/plans/2026-04-04-fusion360-chassis-mockup.md` | Historical — predates rev9+ STEP import work |
+| STEP import plan (rev9–rev11) | `docs/superpowers/plans/2026-04-11-step-import-chassis.md` | Complete with rev10/rev11 addenda |
+| Fusion 360 script | `docs/chassis/fusion360/roscar_v2_chassis.py` | **rev13 — frame verified, ready for fabrication** |
 | Fusion 360 README | `docs/chassis/fusion360/README.md` | Complete |
-| 3D models (STEP/F3D) | `docs/chassis/models/` | Added 2026-04-11 — extrusions, brackets, T-nuts |
+| 3D models (STEP/F3D) | `docs/chassis/models/` | Extrusions, brackets, T-nuts. Non-structural component STEPs (Pi5, lidar, motors, wheels) still to source from GrabCAD. |
 
 ## Current State: Fusion 360 Model
 
@@ -110,12 +111,13 @@ Designing a new aluminum extrusion chassis (v2) to replace the robot's current m
 
 ## What To Do Next
 
-1. **Test rev10** in Fusion 360 — verify STEP models import, scale, and position correctly. Known risks:
-   - Bracket origin may not be at its inner corner — may need to adjust bracket translation offsets after visual inspection
-   - Cross-section centering is checked via `_check_centered()` — if it logs a warning, the extrusion STEP origin isn't at the cross-section center and all `hs` offsets need adjustment
-   - See `docs/superpowers/plans/2026-04-11-step-import-chassis.md` rev10 addendum for full list
-2. ✅ ~~If model looks good: commit the script and spec to git~~ (DONE — script + models + docs in repo)
-3. **Update the design spec** with corrected motor mounting (motors below frame, not inside)
-4. **Design 3D-printable motor mount brackets** in Fusion 360 (parametric, based on caliper measurements)
-5. **Cut extrusion stock** per the cut plan in the spec
-6. **Start physical build**
+1. ✅ ~~Test rev10/rev11 in Fusion 360~~ (DONE — frame verified 2026-04-17, all 22 STEP occurrences in correct positions)
+2. ✅ ~~If model looks good: commit the script and spec to git~~ (DONE)
+3. ✅ ~~Reconcile cut plan with CAD geometry~~ (DONE — spec §4.6 and `tasks/chassis-v2-cut-sheet.md` now match the script)
+4. **➡ CUT EXTRUSION STOCK** per `tasks/chassis-v2-cut-sheet.md` — 13 pieces: 4× 248mm F/R rails, 4× 188mm L/R rails, 4× 100mm posts, 1× 120mm mast
+5. **Source remaining non-structural STEPs** from GrabCAD to replace the placeholder shapes in rev13:
+   - Raspberry Pi 5 (direct from raspberrypi.com, no login)
+   - RPLIDAR C1 (direct from slamtec.com, no login)
+   - Mecanum wheels, JGA25 motors, XT60, C270 camera, 3S LiPo (GrabCAD, login required)
+6. **Design 3D-printable motor mount brackets** in Fusion 360 (parametric, based on caliper measurements — 24mm motor dia, 17mm mount screw spacing)
+7. **Start physical build** — lower deck assembly first, square it via diagonals
