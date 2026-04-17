@@ -38,8 +38,13 @@ import os
 #                         occurrence.transform actually takes effect
 #                       - STEP file existence check (fail fast with clear msg)
 #                       - Bounding-box sanity check for cross-section centering
+#   rev11   2026-04-11  Abandon instance reuse — each rail/post/bracket is its
+#                       own STEP import (22 imports). In rev10 tests, instances
+#                       created via addExistingComponent were positioned at the
+#                       compound transform master×new instead of just new,
+#                       landing them outside the frame. ~20s slower but correct.
 # =============================================================================
-VERSION = 'rev10'
+VERSION = 'rev11'
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Dimensions (cm) — multiply mm by 0.1
@@ -253,7 +258,7 @@ def run(context):
         msg = (f'ROScar1 v2 ({VERSION})\n'
                f'Frame: {FRAME*10:.0f}mm | Track: {trk*10:.0f}mm\n'
                f'WB: {HWB*20:.0f}mm | H: {(MST+MAST_H+LID_H)*10:.0f}mm\n'
-               f'Frame: 6 STEP imports, 22 occurrences')
+               f'Frame: 22 individual STEP imports')
         if _clog: msg += f'\nLog: {_clog[0]}'
         ui.messageBox(msg)
     except:
@@ -368,8 +373,33 @@ def CY(rc, nm, ax, y0, az, r, l, c=None):
 #   Body origin is translated by t = (tx, ty, tz)
 # For the 3030 extrusion STEP, +Y is the length direction.
 
+def _import_rail(rc, name, scale_factor, c0, c1, c2, t):
+    """Import a 3030 extrusion, scale its body, position, and color.
+    Each call does its own import — no instance reuse (see rev11 notes).
+    """
+    occ = _import_step(rc, STEP_EXTRUSION, name)
+    _scale_body_y(occ.component, scale_factor)
+    _clr_occ(occ, 'frame')
+    _place_occ(occ, c0, c1, c2, t)
+    return occ
+
+
+def _import_bracket(rc, step_path, name, c0, c1, c2, t, color='corner'):
+    """Import a bracket STEP and position it. No scaling — brackets are fixed size."""
+    occ = _import_step(rc, step_path, name)
+    _clr_occ(occ, color)
+    _place_occ(occ, c0, c1, c2, t)
+    return occ
+
+
 def _frame(rc):
     """Build the frame from imported STEP models.
+
+    Rev11: Each occurrence is a separate STEP import. Instance reuse via
+    addExistingComponent (rev10) caused the 2nd/3rd/4th instances to compose
+    their transform with the master occurrence's transform, landing them
+    outside the frame. Individual imports avoid this — ~20s longer script
+    run but 100% reliable placement.
 
     Imports go directly into root component — required for occurrence.transform
     to work (setter needs occurrence parent to be the active edit target).
@@ -379,109 +409,67 @@ def _frame(rc):
         if not os.path.exists(path):
             raise RuntimeError(f'STEP model not found: {path}')
 
-    hs = S / 2  # 1.5 cm: half the 3030 profile width
-    inner_len = FRAME - 2 * S  # left/right rail length (fits between F/R rails)
+    hs = S / 2                    # 1.5 cm: half the 3030 profile width
+    inner_len = FRAME - 2 * S     # left/right rail length
+    fr_scale = FRAME / 10         # front/rear rail scale factor (248/100)
+    lr_scale = inner_len / 10     # left/right rail scale factor (188/100)
+    post_scale = POST_H / 10      # post scale (100/100 = 1.0, but explicit)
+    mast_scale = MAST_H / 10      # mast scale (120/100)
 
     # --------------------------------------------------------------------
     # Long rails (front/rear) — runs along world +Y, full FRAME length
-    # Body +Y is the length axis, so for Y-rails we want identity rotation.
-    # Cross-section is centered at origin, so translate +hs in X and Z to
-    # place the rail's XZ corner at the target (x=0, z=LO) position.
+    # Body +Y is the length axis, so identity rotation is correct.
+    # Cross-section centered at origin, so translate +hs in X and Z.
     # --------------------------------------------------------------------
-    long_occ = _import_step(rc, STEP_EXTRUSION, 'Rail_FR_248mm')
-    _scale_body_y(long_occ.component, FRAME / 10)
-    _clr_occ(long_occ, 'frame')
-    _check_centered(long_occ, 'Long rail')
-    long_comp = long_occ.component
-    # First occurrence becomes Lo_Front; 3 more instances for the other F/R rails
-    _place_occ(long_occ,                 _X, _Y, _Z, (hs,        0, LO + hs))
-    _instance(rc, long_comp,             _X, _Y, _Z, (FRAME - hs, 0, LO + hs))
-    _instance(rc, long_comp,             _X, _Y, _Z, (hs,        0, HI + hs))
-    _instance(rc, long_comp,             _X, _Y, _Z, (FRAME - hs, 0, HI + hs))
+    first = _import_rail(rc, 'Rail_FR_Lo_Front', fr_scale, _X, _Y, _Z, (hs,        0, LO + hs))
+    _check_centered(first, 'Long rail')
+    _import_rail(rc,     'Rail_FR_Lo_Rear',  fr_scale, _X, _Y, _Z, (FRAME - hs, 0, LO + hs))
+    _import_rail(rc,     'Rail_FR_Hi_Front', fr_scale, _X, _Y, _Z, (hs,        0, HI + hs))
+    _import_rail(rc,     'Rail_FR_Hi_Rear',  fr_scale, _X, _Y, _Z, (FRAME - hs, 0, HI + hs))
 
     # --------------------------------------------------------------------
     # Short rails (left/right) — runs along world +X, inner length.
-    # Body +Y (length) must map to world +X. That's a rotation that sends:
-    #   body +X -> world -Y   (column c0 = -Y)
-    #   body +Y -> world +X   (column c1 = +X)   <- this is the length axis
-    #   body +Z -> world +Z   (column c2 = +Z)
-    # This has determinant +1 (proper rotation, equivalent to -90deg around Z).
-    # Translate so body origin (0,0,0) lands at (x=S, y=hs, z=LO+hs) — the
-    # corner of the left rail at its low-X, low-Y, low-Z extent.
+    # Body +Y (length) maps to world +X via rotation with columns (-Y, +X, +Z).
     # --------------------------------------------------------------------
-    short_occ = _import_step(rc, STEP_EXTRUSION, 'Rail_LR_188mm')
-    _scale_body_y(short_occ.component, inner_len / 10)
-    _clr_occ(short_occ, 'frame')
-    short_comp = short_occ.component
-    _place_occ(short_occ,                _NY, _X, _Z, (S, hs,          LO + hs))
-    _instance(rc, short_comp,            _NY, _X, _Z, (S, FRAME - hs,  LO + hs))
-    _instance(rc, short_comp,            _NY, _X, _Z, (S, hs,          HI + hs))
-    _instance(rc, short_comp,            _NY, _X, _Z, (S, FRAME - hs,  HI + hs))
+    _import_rail(rc, 'Rail_LR_Lo_Left',  lr_scale, _NY, _X, _Z, (S, hs,         LO + hs))
+    _import_rail(rc, 'Rail_LR_Lo_Right', lr_scale, _NY, _X, _Z, (S, FRAME - hs, LO + hs))
+    _import_rail(rc, 'Rail_LR_Hi_Left',  lr_scale, _NY, _X, _Z, (S, hs,         HI + hs))
+    _import_rail(rc, 'Rail_LR_Hi_Right', lr_scale, _NY, _X, _Z, (S, FRAME - hs, HI + hs))
 
     # --------------------------------------------------------------------
-    # Vertical posts (100mm = 10cm — no scaling needed, factor = 1.0)
-    # Body +Y (length) must map to world +Z. Rotation:
-    #   body +X -> world +X   (column c0 = +X)
-    #   body +Y -> world +Z   (column c1 = +Z)   <- length axis
-    #   body +Z -> world -Y   (column c2 = -Y)
-    # Determinant +1 (proper rotation, equivalent to +90deg around X).
+    # Vertical posts (100mm). Body +Y maps to world +Z via (+X, +Z, -Y).
     # --------------------------------------------------------------------
-    post_occ = _import_step(rc, STEP_EXTRUSION, 'Post_100mm')
-    # No scale needed — source STEP is already 10cm = POST_H
-    _clr_occ(post_occ, 'frame')
-    post_comp = post_occ.component
-    _place_occ(post_occ,                 _X, _Z, _NY, (hs,         hs,         LO + S))
-    _instance(rc, post_comp,             _X, _Z, _NY, (hs,         FRAME - hs, LO + S))
-    _instance(rc, post_comp,             _X, _Z, _NY, (FRAME - hs, hs,         LO + S))
-    _instance(rc, post_comp,             _X, _Z, _NY, (FRAME - hs, FRAME - hs, LO + S))
+    _import_rail(rc, 'Post_FL', post_scale, _X, _Z, _NY, (hs,         hs,         LO + S))
+    _import_rail(rc, 'Post_FR', post_scale, _X, _Z, _NY, (hs,         FRAME - hs, LO + S))
+    _import_rail(rc, 'Post_RL', post_scale, _X, _Z, _NY, (FRAME - hs, hs,         LO + S))
+    _import_rail(rc, 'Post_RR', post_scale, _X, _Z, _NY, (FRAME - hs, FRAME - hs, LO + S))
 
     # --------------------------------------------------------------------
-    # Lidar mast (120mm) — single vertical post at center-rear of upper deck
-    # Same orientation as posts but scaled to MAST_H.
+    # Lidar mast (120mm) — single vertical post at center-rear of upper deck.
     # --------------------------------------------------------------------
-    mast_occ = _import_step(rc, STEP_EXTRUSION, 'Mast_120mm')
-    _scale_body_y(mast_occ.component, MAST_H / 10)
-    _clr_occ(mast_occ, 'frame')
-    _place_occ(mast_occ, _X, _Z, _NY, (FRAME - S, FRAME / 2, MST))
+    _import_rail(rc, 'Mast', mast_scale, _X, _Z, _NY, (FRAME - S, FRAME / 2, MST))
 
     # --------------------------------------------------------------------
     # Corner brackets (8 total) — STEP has arms along +X, +Y, +Z.
-    # For each corner, the 3 arms must point along specific world directions:
-    #   Lower deck: Z arm points UP (into post above)
-    #   Upper deck: Z arm points DOWN (into post below)
-    # Some corner orientations need a reflection if mapped naively; we use
-    # arm-swaps instead to keep all rotations PROPER (determinant +1).
-    # The bracket has ~3-fold symmetry so swapping the X/Y arm assignments
-    # is visually indistinguishable from a "correct" mapping.
-    #
-    # Bracket table: (name, tx, ty, tz, c0, c1, c2)
-    # Verify each has det=+1 — a mirror determinant would render the body
-    # with inverted normals.
+    # Lower deck: Z arm points UP. Upper deck: Z arm points DOWN.
+    # Upper-deck rotations swap X/Y columns to keep det=+1 (proper rotation).
     # --------------------------------------------------------------------
-    bracket_occ = _import_step(rc, STEP_CORNER_BRACKET, 'Corner_Bracket_3way')
-    _clr_occ(bracket_occ, 'corner')
-    bc = bracket_occ.component
-
-    lo_z = LO + S  # lower junction: top of lower rail, bottom of post
-    hi_z = HI       # upper junction: bottom of upper rail, top of post
-
-    # First bracket uses the template's own occurrence
-    _place_occ(bracket_occ,               _X,  _Y,  _Z,  (0,     0,     lo_z))  # FL_Lo
-    _instance(rc, bc,                     _NY, _X,  _Z,  (0,     FRAME, lo_z))  # FR_Lo
-    _instance(rc, bc,                     _Y,  _NX, _Z,  (FRAME, 0,     lo_z))  # RL_Lo
-    _instance(rc, bc,                     _NX, _NY, _Z,  (FRAME, FRAME, lo_z))  # RR_Lo
-    # Upper deck: Z arm flipped. Swap X/Y columns to keep det=+1.
-    _instance(rc, bc,                     _Y,  _X,  _NZ, (0,     0,     hi_z))  # FL_Hi
-    _instance(rc, bc,                     _X,  _NY, _NZ, (0,     FRAME, hi_z))  # FR_Hi
-    _instance(rc, bc,                     _NX, _Y,  _NZ, (FRAME, 0,     hi_z))  # RL_Hi
-    _instance(rc, bc,                     _NY, _NX, _NZ, (FRAME, FRAME, hi_z))  # RR_Hi
+    # Lower deck brackets
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_FL', _X,  _Y,  _Z, (0,     0,     LO + S))
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_FR', _NY, _X,  _Z, (0,     FRAME, LO + S))
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_RL', _Y,  _NX, _Z, (FRAME, 0,     LO + S))
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_RR', _NX, _NY, _Z, (FRAME, FRAME, LO + S))
+    # Upper deck brackets — Z flipped
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_FL', _Y,  _X,  _NZ, (0,     0,     HI))
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_FR', _X,  _NY, _NZ, (0,     FRAME, HI))
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_RL', _NX, _Y,  _NZ, (FRAME, 0,     HI))
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_RR', _NY, _NX, _NZ, (FRAME, FRAME, HI))
 
     # --------------------------------------------------------------------
     # T-plate bracket for lidar mast attachment to rear upper rail
     # --------------------------------------------------------------------
-    tplate_occ = _import_step(rc, STEP_TPLATE_M6, 'Mast_TPlate')
-    _clr_occ(tplate_occ, 'corner')
-    _place_occ(tplate_occ, _X, _Y, _Z, (FRAME - S, FRAME / 2, MST - 0.1))
+    _import_bracket(rc, STEP_TPLATE_M6, 'Mast_TPlate',
+                    _X, _Y, _Z, (FRAME - S, FRAME / 2, MST - 0.1))
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Plates & standoffs
