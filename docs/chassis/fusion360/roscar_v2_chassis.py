@@ -84,8 +84,26 @@ import os
 #                         claiming all 8 rails at 248mm). See
 #                         docs/superpowers/specs/2026-04-04-extrusion-chassis-
 #                         design.md §4.6 and tasks/chassis-v2-cut-sheet.md.
+#                       - Palette refinement: frame color changed to black
+#                         anodized (35,37,42) to match physical stock; motor
+#                         L-brackets back to orange (pop against black frame).
+#                       - Fixed _check_centered() false-positive by reading
+#                         component-local body bbox instead of post-transform
+#                         occurrence bbox.
+#   rev14   2026-04-17  Real component STEP imports begin:
+#                       - Raspberry Pi 5 STEP from raspberrypi.com replaces the
+#                         procedural RPi5 block when the file is present
+#                       - RPLIDAR C1 STEP from slamtec.com replaces the
+#                         procedural Lidar_Base + Lidar_Head blocks
+#                       - Both imports are conditional: script falls back to
+#                         the procedural placeholder if the STEP file is
+#                         missing (e.g. fresh checkout without running the
+#                         download step).
+#                       - Placement is an initial guess — may need small
+#                         translation/rotation offsets after visual check
+#                         depending on each STEP's native origin reference.
 # =============================================================================
-VERSION = 'rev13'
+VERSION = 'rev14'
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Dimensions (cm) — multiply mm by 0.1
@@ -158,6 +176,9 @@ _MODELS = r'D:\localrepos\ROScar1\docs\chassis\models'
 STEP_EXTRUSION = os.path.join(_MODELS, 'extrusions', '30X30 - T-slot - Aluminium Profile.step')
 STEP_CORNER_BRACKET = os.path.join(_MODELS, 'brackets', '3030 - 3-way corner bracket.step')
 STEP_TPLATE_M6 = os.path.join(_MODELS, 'brackets', 'T-Plate 3030 5 Holes - M6.step')
+# Non-structural (optional — script falls back to placeholder blocks if absent)
+STEP_RPI5 = os.path.join(_MODELS, 'electronics', 'RaspberryPi5.step')
+STEP_RPLIDAR_C1 = os.path.join(_MODELS, 'electronics', 'rplidar-c1.stp')
 
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP import helpers
@@ -311,7 +332,8 @@ def run(context):
         msg = (f'ROScar1 v2 ({VERSION})\n'
                f'Frame: {FRAME*10:.0f}mm | Track: {trk*10:.0f}mm\n'
                f'WB: {HWB*20:.0f}mm | H: {(MST+MAST_H+LID_H)*10:.0f}mm\n'
-               f'Cut plan: 4x248mm + 4x188mm + 4x100mm posts + 1x120mm mast')
+               f'Cut plan: 4x248mm + 4x188mm + 4x100mm posts + 1x120mm mast\n'
+               f'Real STEPs: RPi5 + RPLIDAR C1 (other components still placeholder)')
         if _clog: msg += f'\nLog: {_clog[0]}'
         ui.messageBox(msg)
     except:
@@ -581,9 +603,23 @@ def _components(rc):
     bx = FRAME * 0.7
     B(rc, 'MotorBoard', bx-BRD[0]/2, c-BRD[1]/2, cz, BRD[0], BRD[1], BRD[2], 'pcb')
 
-    # RPi5 in Argon NEO case — plain case block on upper deck
+    # ── RPi5: import real STEP if available, else fall back to placeholder ──
     rz = HI + S + PLT_T
-    B(rc, 'RPi5', c-RPI[0]/2, c-RPI[1]/2, rz, RPI[0], RPI[1], RPI[2], 'rpi')
+    if os.path.exists(STEP_RPI5):
+        # Real Raspberry Pi 5 CAD from raspberrypi.com.
+        # Native origin is typically PCB bottom-front-left corner. Board is
+        # 85 x 56 mm. Center it on the upper deck at the target Z.
+        # Initial guess: PCB-origin placed at (c-85/2, c-56/2, rz). May need
+        # a small offset tweak on first run depending on the STEP's reference.
+        try:
+            rpi_occ = _import_step(rc, STEP_RPI5, 'RPi5')
+            _clr_occ(rpi_occ, 'rpi')
+            _place_occ(rpi_occ, _X, _Y, _Z, (c - 4.25, c - 2.8, rz))
+        except Exception as e:
+            _clog.append(f'RPi5 STEP import failed: {e}')
+            B(rc, 'RPi5', c-RPI[0]/2, c-RPI[1]/2, rz, RPI[0], RPI[1], RPI[2], 'rpi')
+    else:
+        B(rc, 'RPi5', c-RPI[0]/2, c-RPI[1]/2, rz, RPI[0], RPI[1], RPI[2], 'rpi')
 
     # ── Lidar mount plate (connector between mast and lidar) ────────────
     lcx, lcy = FRAME-S, FRAME/2
@@ -599,11 +635,24 @@ def _components(rc):
                     ( LID_SZ/2*0.7,  LID_SZ/2*0.7)]:
         CZ(rc, 'Lidar_Screw', lcx+dx, lcy+dy, mp_z+mp_t, 0.18, 0.15, 'bracket')
 
-    # Lidar — simple base + head
+    # ── RPLIDAR C1: real STEP or placeholder ──
     lz = mp_z + mp_t
-    bh = LID_H * 0.35;  hh = LID_H * 0.65
-    B(rc, 'Lidar_Base', lcx-LID_SZ/2, lcy-LID_SZ/2, lz, LID_SZ, LID_SZ, bh, 'lidar')
-    CZ(rc, 'Lidar_Head', lcx, lcy, lz+bh, LID_SZ/2*0.9, hh, 'lidar')
+    if os.path.exists(STEP_RPLIDAR_C1):
+        # Real RPLIDAR C1 CAD from slamtec.com. Body is 55.6x55.6x41.3mm.
+        # Initial guess: center on mast top. Adjust if orientation is off.
+        try:
+            lid_occ = _import_step(rc, STEP_RPLIDAR_C1, 'RPLIDAR_C1')
+            _clr_occ(lid_occ, 'lidar')
+            _place_occ(lid_occ, _X, _Y, _Z, (lcx - LID_SZ/2, lcy - LID_SZ/2, lz))
+        except Exception as e:
+            _clog.append(f'RPLIDAR STEP import failed: {e}')
+            bh = LID_H * 0.35; hh = LID_H * 0.65
+            B(rc, 'Lidar_Base', lcx-LID_SZ/2, lcy-LID_SZ/2, lz, LID_SZ, LID_SZ, bh, 'lidar')
+            CZ(rc, 'Lidar_Head', lcx, lcy, lz+bh, LID_SZ/2*0.9, hh, 'lidar')
+    else:
+        bh = LID_H * 0.35; hh = LID_H * 0.65
+        B(rc, 'Lidar_Base', lcx-LID_SZ/2, lcy-LID_SZ/2, lz, LID_SZ, LID_SZ, bh, 'lidar')
+        CZ(rc, 'Lidar_Head', lcx, lcy, lz+bh, LID_SZ/2*0.9, hh, 'lidar')
 
     # Camera — simple body + lens, single mounting clip
     cam_z = HI + S/2
