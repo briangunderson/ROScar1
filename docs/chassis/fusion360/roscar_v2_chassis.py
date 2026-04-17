@@ -139,13 +139,12 @@ N_SEGS = 6;  SEG_GAP_RATIO = 0.12;  DIAG_SHIFT = 0.15  # cm shift per segment
 # Color palette
 # ═══════════════════════════════════════════════════════════════════════════
 PAL = {
-    # rev13: palette matches the physical inventory. Stock is BLACK anodized
-    # 3030 (not silver — Brian's 500mm + 400mm sticks are all black per the
-    # BOM), so the frame rails/posts/mast are near-black. Corner brackets are
-    # a lighter anodized gray-silver (the real ones he has on hand are
-    # typically silver or raw aluminum). Deck plates are warm tan (clear
-    # acrylic or G10) to pop against the dark frame.
-    'frame':    (35, 37, 42),      # black anodized 3030 stock (matches real)
+    # rev14: frame color compromises between "matches physical black stock"
+    # and "visible against Fusion's dark blue viewport background". Pure black
+    # (35,37,42) blended into the shadows making upper rails and posts look
+    # absent. This is a dark graphite — still reads as black anodized metal,
+    # but with enough value to show edges in the viewport.
+    'frame':    (95, 100, 110),    # dark graphite (anodized black aluminum)
     'plate':    (215, 180, 120),   # warm tan acrylic / amber G10
     'battery':  (40, 95, 175),     # battery blue
     'pcb':      (35, 90, 55),      # PCB green
