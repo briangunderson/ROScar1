@@ -102,8 +102,23 @@ import os
 #                       - Placement is an initial guess — may need small
 #                         translation/rotation offsets after visual check
 #                         depending on each STEP's native origin reference.
+#   rev15   2026-04-17  Fix 'floating objects' bug from rev14:
+#                       - Pi5 and RPLIDAR STEPs were being imported into the
+#                         '4 - Electronics' sub-component, where
+#                         occurrence.transform silently fails (the parent
+#                         must be the active edit target — root at script
+#                         start). Both STEPs ended up stuck at origin (0,0,0)
+#                         while the frame and rest of the model were up in
+#                         the chassis — looked like they were 'floating'.
+#                       - _components() now takes a root arg; STEP imports
+#                         go to root, procedural placeholders stay in the
+#                         Electronics sub-component.
+#                       - Frame color (95,100,110) dark graphite — the pure
+#                         black (35,37,42) from rev13 blended with Fusion's
+#                         dark blue background; upper rails + posts + mast
+#                         were invisible.
 # =============================================================================
-VERSION = 'rev14'
+VERSION = 'rev15'
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Dimensions (cm) — multiply mm by 0.1
@@ -319,8 +334,12 @@ def run(context):
         _plates(_comp(rc, '2 - Deck Plates'))
         _standoffs(_comp(rc, '3 - Standoffs'))
 
+        # Electronics: pass BOTH the sub-component (for procedural placeholder
+        # shapes) and root (for STEP imports — occurrence.transform requires
+        # the occurrence's parent to be the active edit target at script
+        # start, which is always root).
         elec = _comp(rc, '4 - Electronics')
-        _components(elec)
+        _components(elec, rc)
 
         _drive(_comp(rc, '5 - Drive System'))
         _wiring(_comp(rc, '6 - Wiring'))
@@ -577,22 +596,24 @@ def _standoffs(rc):
 # ═══════════════════════════════════════════════════════════════════════════
 # Components
 # ═══════════════════════════════════════════════════════════════════════════
-def _components(rc):
-    """Non-structural components as simple placeholders (rev13).
+def _components(rc, root=None):
+    """Non-structural components as simple placeholders (rev13+).
 
-    User directive: "a simple shape representing the raspi, lidar, motor board,
-    etc is fine at this stage". Focus is on getting the FRAME right for
-    fabrication — detailed electronics can be added back once we have real
-    STEP models from GrabCAD/manufacturers.
+    Procedural placeholder geometry (battery/board/camera) is created IN the
+    Electronics sub-component (rc). Real STEP imports, however, must go into
+    ROOT (not the sub-component) because `occurrence.transform` only works
+    when the occurrence's parent is the active edit target at script start
+    — which is always root. STEPs imported into a sub-component silently
+    land at origin instead of their placement transform.
 
-    Kept: bounding-box representations so the components occupy realistic
-    space and clash detection still works. Dropped: all fake SMD/port/header
-    detail, battery strap, cable leads — these were procedural guesses that
-    look worse than real CAD.
+    That was the rev14 bug the user saw as "objects floating in the air" —
+    the Pi5 and RPLIDAR STEPs ended up stuck at (0,0,0) while everything
+    else was up in the chassis.
 
-    Kept: lidar mount plate (this IS a connector between mast and lidar —
-    the user explicitly listed connectors as important).
+    Pass root=None to place STEP imports in rc too (legacy behaviour).
     """
+    if root is None:
+        root = rc
     c = FRAME/2;  cz = LO + S + PLT_T
 
     # Battery — simple box on lower deck
@@ -605,13 +626,11 @@ def _components(rc):
     # ── RPi5: import real STEP if available, else fall back to placeholder ──
     rz = HI + S + PLT_T
     if os.path.exists(STEP_RPI5):
-        # Real Raspberry Pi 5 CAD from raspberrypi.com.
-        # Native origin is typically PCB bottom-front-left corner. Board is
-        # 85 x 56 mm. Center it on the upper deck at the target Z.
-        # Initial guess: PCB-origin placed at (c-85/2, c-56/2, rz). May need
-        # a small offset tweak on first run depending on the STEP's reference.
+        # Real Raspberry Pi 5 CAD from raspberrypi.com. PCB is 85 x 56 mm.
+        # Imported into ROOT so occurrence.transform actually places it
+        # where we ask. Initial guess: PCB origin at upper-deck center.
         try:
-            rpi_occ = _import_step(rc, STEP_RPI5, 'RPi5')
+            rpi_occ = _import_step(root, STEP_RPI5, 'RPi5')
             _clr_occ(rpi_occ, 'rpi')
             _place_occ(rpi_occ, _X, _Y, _Z, (c - 4.25, c - 2.8, rz))
         except Exception as e:
@@ -638,9 +657,9 @@ def _components(rc):
     lz = mp_z + mp_t
     if os.path.exists(STEP_RPLIDAR_C1):
         # Real RPLIDAR C1 CAD from slamtec.com. Body is 55.6x55.6x41.3mm.
-        # Initial guess: center on mast top. Adjust if orientation is off.
+        # Imported into ROOT so the placement transform actually applies.
         try:
-            lid_occ = _import_step(rc, STEP_RPLIDAR_C1, 'RPLIDAR_C1')
+            lid_occ = _import_step(root, STEP_RPLIDAR_C1, 'RPLIDAR_C1')
             _clr_occ(lid_occ, 'lidar')
             _place_occ(lid_occ, _X, _Y, _Z, (lcx - LID_SZ/2, lcy - LID_SZ/2, lz))
         except Exception as e:
