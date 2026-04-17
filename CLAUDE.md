@@ -61,6 +61,9 @@ Key: EKF owns odom->base_footprint TF (driver publish_odom_tf=false)
 | `roscar_ws/src/roscar_driver/roscar_driver/landmark_localizer_node.py` | ArUco marker-based pose correction |
 | `roscar_ws/src/roscar_driver/config/landmark_params.yaml` | Landmark localizer config |
 | `scripts/setup_rpi.sh` | RPi5 initial setup script |
+| `docs/chassis/fusion360/roscar_v2_chassis.py` | Fusion 360 parametric chassis model script (rev10 — imports real STEP models) |
+| `docs/chassis/models/` | 3D models: 3030 extrusion, brackets, T-nuts (STEP/IGES/F3D) |
+| `tasks/chassis-v2-handoff.md` | Chassis v2 session handoff — design decisions, status, next steps |
 
 ## Packages
 

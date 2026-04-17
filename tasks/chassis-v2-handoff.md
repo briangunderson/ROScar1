@@ -1,7 +1,7 @@
 # Chassis v2 Design — Session Handoff
 
-**Date:** 2026-04-05
-**Status:** Fusion 360 model rev8b ready to test, design spec complete
+**Date:** 2026-04-11 (updated)
+**Status:** Fusion 360 model rev10 (STEP imports) ready to test, design spec complete, 3D models in repo
 
 ## What We're Doing
 
@@ -14,8 +14,9 @@ Designing a new aluminum extrusion chassis (v2) to replace the robot's current m
 | Document | Path | Status |
 |----------|------|--------|
 | Design spec | `docs/superpowers/specs/2026-04-04-extrusion-chassis-design.md` | Complete, reviewed |
-| Implementation plan | `docs/superpowers/plans/2026-04-04-fusion360-chassis-mockup.md` | Written (needs update for rev7+ changes) |
-| Fusion 360 script | `docs/chassis/fusion360/roscar_v2_chassis.py` | **rev8b — NEEDS TESTING** |
+| Implementation plan (rev8 mockup) | `docs/superpowers/plans/2026-04-04-fusion360-chassis-mockup.md` | Written — predates rev9/rev10 STEP import work |
+| STEP import plan (rev9/rev10) | `docs/superpowers/plans/2026-04-11-step-import-chassis.md` | Complete with rev10 addendum |
+| Fusion 360 script | `docs/chassis/fusion360/roscar_v2_chassis.py` | **rev10 — NEEDS TESTING in Fusion 360** |
 | Fusion 360 README | `docs/chassis/fusion360/README.md` | Complete |
 | 3D models (STEP/F3D) | `docs/chassis/models/` | Added 2026-04-11 — extrusions, brackets, T-nuts |
 
@@ -109,8 +110,11 @@ Designing a new aluminum extrusion chassis (v2) to replace the robot's current m
 
 ## What To Do Next
 
-1. **Test rev8b** in Fusion 360 — verify sub-components don't explode
-2. If model looks good: **commit the script and spec** to git
+1. **Test rev10** in Fusion 360 — verify STEP models import, scale, and position correctly. Known risks:
+   - Bracket origin may not be at its inner corner — may need to adjust bracket translation offsets after visual inspection
+   - Cross-section centering is checked via `_check_centered()` — if it logs a warning, the extrusion STEP origin isn't at the cross-section center and all `hs` offsets need adjustment
+   - See `docs/superpowers/plans/2026-04-11-step-import-chassis.md` rev10 addendum for full list
+2. ✅ ~~If model looks good: commit the script and spec to git~~ (DONE — script + models + docs in repo)
 3. **Update the design spec** with corrected motor mounting (motors below frame, not inside)
 4. **Design 3D-printable motor mount brackets** in Fusion 360 (parametric, based on caliper measurements)
 5. **Cut extrusion stock** per the cut plan in the spec
