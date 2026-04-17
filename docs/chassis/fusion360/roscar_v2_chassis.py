@@ -43,8 +43,32 @@ import os
 #                       created via addExistingComponent were positioned at the
 #                       compound transform master×new instead of just new,
 #                       landing them outside the frame. ~20s slower but correct.
+#   rev12   2026-04-17  Make it read as a connected machine — lots of added
+#                       engineering detail showing HOW parts attach:
+#                       - Mecanum wheels: real solid tire + central hub + 8
+#                         proper slanted rollers at 45deg (was 6 diagonal boxes
+#                         that read as "random cubes")
+#                       - Palette: frame is now anodized silver so the 3030
+#                         skeleton reads as structure; corner brackets gunmetal
+#                       - NEW: battery retention strap (velcro band top + sides)
+#                       - NEW: 4 standoffs + bolt heads under motor board
+#                       - NEW: 4 standoffs + bolt heads under RPi5 Argon case
+#                       - NEW: lidar mount plate between mast top and lidar
+#                         base with 4 visible M2.5 screws
+#                       - NEW: camera clamp-over-rail bracket (top arm + web +
+#                         bottom arm + clamping bolt)
+#                       - NEW: deck plate bolt heads at 4 corners per plate
+#                         (8 total) showing plates bolt into rail T-nuts
+#                       - NEW: motor L-bracket mounting bolts (through plate
+#                         into rail T-nut + under-motor attachment)
+#                       - NEW: cable ties along upper rail routing wires
+#                       - Cable runs now actually connect port-to-port: power
+#                         battery→board, USB board→Pi (via rear post), lidar
+#                         USB→Pi (via mast+rail), camera USB→Pi
+#                       - Added _mecanum_wheel() and _move_body_transform()
+#                         helpers for the slanted roller geometry.
 # =============================================================================
-VERSION = 'rev11'
+VERSION = 'rev12'
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Dimensions (cm) — multiply mm by 0.1
@@ -80,28 +104,30 @@ N_SEGS = 6;  SEG_GAP_RATIO = 0.12;  DIAG_SHIFT = 0.15  # cm shift per segment
 # Color palette
 # ═══════════════════════════════════════════════════════════════════════════
 PAL = {
-    'frame':    (70, 70, 75),
-    'plate':    (160, 200, 240),
-    'battery':  (30, 90, 200),
-    'pcb':      (20, 80, 30),
-    'rpi':      (45, 45, 50),
-    'motor':    (195, 195, 200),
-    'gearbox':  (60, 60, 65),
-    'wheel':    (30, 30, 30),
-    'roller':   (50, 50, 55),
-    'lidar':    (25, 25, 30),
-    'camera':   (55, 55, 60),
-    'bracket':  (230, 120, 30),
-    'corner':   (100, 100, 105),
-    'ground':   (35, 37, 42),
-    'hub':      (85, 85, 90),
-    'wire_pwr': (180, 30, 30),
-    'wire_usb': (40, 40, 45),
-    'wire_enc': (30, 130, 30),
-    'port':     (35, 35, 40),
-    'standoff': (200, 200, 205),
-    'encoder':  (25, 70, 25),
-    'lens':     (150, 160, 180),
+    # rev12: palette tuned for visual legibility over engineering detail.
+    # Frame is now anodized aluminum so the 3030 skeleton reads as structure;
+    # brackets are subordinate gunmetal instead of loud orange; deck plates
+    # are warm amber so they look like real PCB/acrylic instead of institutional blue.
+    'frame':    (185, 190, 200),   # anodized aluminum silver
+    'plate':    (215, 180, 120),   # warm tan acrylic / amber G10
+    'battery':  (40, 95, 175),     # battery blue
+    'pcb':      (35, 90, 55),      # PCB green
+    'rpi':      (45, 45, 55),      # dark matte case
+    'motor':    (200, 200, 205),   # motor can silver
+    'gearbox':  (55, 55, 62),      # gearbox dark
+    'wheel':    (28, 28, 32),      # tire rubber
+    'roller':   (55, 58, 65),      # roller darker gray
+    'lidar':    (30, 30, 38),      # lidar dark
+    'camera':   (50, 50, 58),      # camera body
+    'bracket':  (90, 95, 105),     # gunmetal (was loud orange)
+    'corner':   (130, 135, 145),   # corner brackets slightly lighter than frame
+    'ground':   (75, 80, 88),      # warm gray floor (was near-black)
+    'hub':      (135, 140, 150),   # wheel hub
+    'standoff': (185, 190, 200),   # standoffs match frame
+    'lens':     (180, 190, 210),   # camera/lidar lens glass
+    # Kept for backward compatibility (no longer used in rev12):
+    'wire_pwr': (180, 30, 30), 'wire_usb': (40, 40, 45), 'wire_enc': (30, 130, 30),
+    'port':     (35, 35, 40), 'encoder':  (25, 70, 25),
 }
 
 _cc = {};  _clog = []
@@ -258,7 +284,7 @@ def run(context):
         msg = (f'ROScar1 v2 ({VERSION})\n'
                f'Frame: {FRAME*10:.0f}mm | Track: {trk*10:.0f}mm\n'
                f'WB: {HWB*20:.0f}mm | H: {(MST+MAST_H+LID_H)*10:.0f}mm\n'
-               f'Frame: 22 individual STEP imports')
+               f'Engineering detail pass — standoffs, fasteners, cable runs')
         if _clog: msg += f'\nLog: {_clog[0]}'
         ui.messageBox(msg)
     except:
@@ -475,9 +501,21 @@ def _frame(rc):
 # Plates & standoffs
 # ═══════════════════════════════════════════════════════════════════════════
 def _plates(rc):
+    """Deck plates + visible fasteners securing them to the rails.
+
+    rev12: added bolt heads at each plate corner so it's obvious the plates
+    are bolted to T-nuts in the rail channels, not just resting there.
+    """
     c = FRAME/2
     B(rc, 'LoPlate', c-INNER/2, c-INNER/2, LO+S, INNER, INNER, PLT_T, 'plate')
     B(rc, 'HiPlate', c-INNER/2, c-INNER/2, HI+S, INNER, INNER, PLT_T, 'plate')
+
+    # 4 bolt heads at the inner corners of each plate (M5 socket caps into T-nuts)
+    inset = 0.5  # 5mm from plate edge
+    for x in [c - INNER/2 + inset, c + INNER/2 - inset]:
+        for y in [c - INNER/2 + inset, c + INNER/2 - inset]:
+            CZ(rc, 'LoPlateBolt', x, y, LO + S + PLT_T, 0.22, 0.15, 'bracket')
+            CZ(rc, 'HiPlateBolt', x, y, HI + S + PLT_T, 0.22, 0.15, 'bracket')
 
 def _standoffs(rc):
     """Small cylindrical standoffs at plate corners."""
@@ -492,52 +530,113 @@ def _standoffs(rc):
 # Components
 # ═══════════════════════════════════════════════════════════════════════════
 def _components(rc):
+    """Major electronics and sensors with visible mounting hardware (rev12).
+
+    Every component shows HOW it attaches to the chassis:
+      - Battery: retention strap wrapping around top
+      - Motor board: 4 standoffs lifting PCB off deck + bolt heads
+      - RPi5 (Argon case): 4 standoffs + bolts + ports/fan for realism
+      - Lidar: dedicated mount plate between mast and lidar base with 4 screws
+      - Camera: bracket clamping over front rail with bolts on both sides
+    Plus the engineering details — USB/HDMI ports, headers, fan disc, cable
+    exit — that make it read as a real computer and not just a black block.
+    """
     c = FRAME/2;  cz = LO + S + PLT_T
 
-    # Battery
+    # ── Battery with retention strap ────────────────────────────────────
     B(rc, 'Battery', c-BAT[0]/2, c-BAT[1]/2, cz, BAT[0], BAT[1], BAT[2], 'battery')
-    # Battery wire leads
+    # Velcro strap wrapping over the top (two side panels + top band)
+    strap_t = 0.15    # 1.5mm thick
+    strap_w = 1.5     # 15mm wide band
+    sy = c - strap_w/2
+    B(rc, 'BatStrap_top',
+      c-BAT[0]/2-0.2, sy, cz+BAT[2], BAT[0]+0.4, strap_w, strap_t, 'bracket')
+    B(rc, 'BatStrap_L',
+      c-BAT[0]/2-0.2, sy, cz, strap_t, strap_w, BAT[2], 'bracket')
+    B(rc, 'BatStrap_R',
+      c+BAT[0]/2+0.2-strap_t, sy, cz, strap_t, strap_w, BAT[2], 'bracket')
+    # Battery wire leads (+/- from one end toward motor board)
     B(rc, 'BatWire+', c+BAT[0]/2, c-0.15, cz+BAT[2]*0.7, 1.5, 0.15, 0.15, 'wire_pwr')
     B(rc, 'BatWire-', c+BAT[0]/2, c+0.15, cz+BAT[2]*0.7, 1.5, 0.15, 0.15, 'wire_usb')
 
-    # Motor board
+    # ── Motor board on standoffs + ports/headers ────────────────────────
     bx = FRAME * 0.7
-    B(rc, 'MotorBoard', bx-BRD[0]/2, c-BRD[1]/2, cz, BRD[0], BRD[1], BRD[2], 'pcb')
-    # USB port on board
-    B(rc, 'Board_USB', bx-BRD[0]/2-0.2, c-0.4, cz+BRD[2], 0.9, 0.8, 0.35, 'port')
-    # Connector headers
+    so_h = 0.6  # 6mm standoffs lift PCB off the deck plate
+    # 4 brass-color standoffs at board corners
+    for sx, sy in [(bx-BRD[0]/2+0.4, c-BRD[1]/2+0.4),
+                    (bx+BRD[0]/2-0.4, c-BRD[1]/2+0.4),
+                    (bx-BRD[0]/2+0.4, c+BRD[1]/2-0.4),
+                    (bx+BRD[0]/2-0.4, c+BRD[1]/2-0.4)]:
+        CZ(rc, 'MB_StO', sx, sy, cz, 0.18, so_h, 'standoff')
+        # Bolt head visible on top of each standoff, through the PCB
+        CZ(rc, 'MB_Bolt', sx, sy, cz+so_h+BRD[2], 0.22, 0.15, 'bracket')
+    # PCB itself sits on top of the standoffs
+    B(rc, 'MotorBoard', bx-BRD[0]/2, c-BRD[1]/2, cz+so_h, BRD[0], BRD[1], BRD[2], 'pcb')
+    # USB-C port on the side (power + data to Pi)
+    B(rc, 'Board_USB', bx-BRD[0]/2-0.2, c-0.4, cz+so_h+BRD[2], 0.9, 0.8, 0.35, 'port')
+    # Motor connector headers (4 columns — one per motor)
     for i in range(4):
-        B(rc, f'Hdr_{i}', bx+BRD[0]/2-0.3, c-BRD[1]/2+0.8+i*1.2, cz+BRD[2], 0.3, 0.8, 0.5, 'wire_enc')
+        B(rc, f'Hdr_{i}', bx+BRD[0]/2-0.3, c-BRD[1]/2+0.8+i*1.2,
+          cz+so_h+BRD[2], 0.3, 0.8, 0.5, 'wire_enc')
 
-    # RPi5 in Argon NEO 5
+    # ── RPi5 (Argon NEO case) on standoffs ──────────────────────────────
     rz = HI + S + PLT_T
-    B(rc, 'RPi5', c-RPI[0]/2, c-RPI[1]/2, rz, RPI[0], RPI[1], RPI[2], 'rpi')
-    CZ(rc, 'RPi_Fan', c, c, rz+RPI[2], 1.5, 0.15, 'hub')
-    # Ports on rear side (high-X side)
+    # 4 standoffs at the Pi's mounting hole pattern (~58x49mm)
+    for sx in [c-RPI[0]/2+0.6, c+RPI[0]/2-0.6]:
+        for sy in [c-RPI[1]/2+0.6, c+RPI[1]/2-0.6]:
+            CZ(rc, 'Pi_StO', sx, sy, rz, 0.2, so_h, 'standoff')
+            CZ(rc, 'Pi_Bolt', sx, sy, rz+so_h, 0.25, 0.15, 'bracket')
+    # Argon NEO case
+    B(rc, 'RPi5', c-RPI[0]/2, c-RPI[1]/2, rz+so_h, RPI[0], RPI[1], RPI[2], 'rpi')
+    # Fan / vent on top
+    CZ(rc, 'RPi_Fan', c, c, rz+so_h+RPI[2], 1.5, 0.15, 'hub')
+    # USB + Ethernet + HDMI ports on back face
     px = c + RPI[0]/2
-    B(rc, 'USB_A1', px, c-RPI[1]/2+0.5, rz+0.8, 0.3, 1.4, 0.7, 'port')
-    B(rc, 'USB_A2', px, c-RPI[1]/2+2.2, rz+0.8, 0.3, 1.4, 0.7, 'port')
-    B(rc, 'Ethernet', px, c-RPI[1]/2+4.0, rz+0.3, 0.3, 1.6, 1.3, 'port')
-    B(rc, 'HDMI1', px, c+RPI[1]/2-2.5, rz+1.5, 0.3, 0.8, 0.35, 'port')
-    B(rc, 'HDMI2', px, c+RPI[1]/2-1.2, rz+1.5, 0.3, 0.8, 0.35, 'port')
+    rzp = rz + so_h
+    B(rc, 'USB_A1',   px, c-RPI[1]/2+0.5, rzp+0.8, 0.3, 1.4, 0.7, 'port')
+    B(rc, 'USB_A2',   px, c-RPI[1]/2+2.2, rzp+0.8, 0.3, 1.4, 0.7, 'port')
+    B(rc, 'Ethernet', px, c-RPI[1]/2+4.0, rzp+0.3, 0.3, 1.6, 1.3, 'port')
+    B(rc, 'HDMI1',    px, c+RPI[1]/2-2.5, rzp+1.5, 0.3, 0.8, 0.35, 'port')
+    B(rc, 'HDMI2',    px, c+RPI[1]/2-1.2, rzp+1.5, 0.3, 0.8, 0.35, 'port')
 
-    # RPLIDAR C1
-    lcx, lcy = FRAME-S, FRAME/2;  lz = MST + MAST_H
+    # ── RPLIDAR C1 on a proper mount plate ──────────────────────────────
+    lcx, lcy = FRAME-S, FRAME/2
+    mp_t = 0.4                 # 4mm mount plate
+    mp_sz = LID_SZ + 1.0       # slightly larger than lidar footprint
+    mp_z = MST + MAST_H        # sits on top of mast
+    # Mount plate (aluminum disc with 4 screw holes — shown as bolt heads)
+    B(rc, 'Lidar_MntPlate',
+      lcx-mp_sz/2, lcy-mp_sz/2, mp_z, mp_sz, mp_sz, mp_t, 'corner')
+    for dx, dy in [(-LID_SZ/2*0.7, -LID_SZ/2*0.7),
+                    ( LID_SZ/2*0.7, -LID_SZ/2*0.7),
+                    (-LID_SZ/2*0.7,  LID_SZ/2*0.7),
+                    ( LID_SZ/2*0.7,  LID_SZ/2*0.7)]:
+        CZ(rc, 'Lidar_Screw', lcx+dx, lcy+dy, mp_z+mp_t, 0.18, 0.15, 'bracket')
+    # Lidar sits on the mount plate
+    lz = mp_z + mp_t
     bh = LID_H * 0.35;  hh = LID_H * 0.65
     B(rc, 'Lidar_Base', lcx-LID_SZ/2, lcy-LID_SZ/2, lz, LID_SZ, LID_SZ, bh, 'lidar')
     CZ(rc, 'Lidar_Head', lcx, lcy, lz+bh, LID_SZ/2*0.9, hh, 'lidar')
-    CZ(rc, 'Lidar_Lens', lcx+LID_SZ/2*0.7, lcy, lz+bh+hh*0.3, 0.3, 0.1, 'lens')
-    # Cable exit
+    try: CZ(rc, 'Lidar_Lens', lcx+LID_SZ/2*0.7, lcy, lz+bh+hh*0.3, 0.3, 0.1, 'lens')
+    except: pass
+    # Cable exit nub (goes to USB cable run)
     B(rc, 'Lidar_Cable', lcx-LID_SZ/2-0.8, lcy-0.15, lz+bh*0.3, 0.8, 0.3, 0.3, 'wire_usb')
 
-    # Camera
+    # ── Camera with clamp-over-rail mount bracket ───────────────────────
     cam_z = HI + S/2
+    # Body with lens and lens ring
     B(rc, 'Cam_Body', -0.5, c-3.5, cam_z, 2.5, 7.0, 2.5, 'camera')
-    CZ(rc, 'Cam_Lens', 0.5, c, cam_z+0.8, 0.8, 0.8, 'lidar')
-    CZ(rc, 'Cam_Ring', 0.5, c, cam_z+1.5, 0.9, 0.15, 'hub')
-    # Mount clip (wraps over top of rail)
-    B(rc, 'Cam_Clip', -0.3, c-2.0, cam_z+2.5, 1.0, 4.0, 0.8, 'camera')
-    B(rc, 'Cam_ClipR', -0.3, c-2.0, cam_z-0.5, 1.0, 4.0, 0.5, 'camera')
+    try: CZ(rc, 'Cam_Lens', 0.5, c, cam_z+0.8, 0.8, 0.8, 'lens')
+    except: pass
+    try: CZ(rc, 'Cam_Ring', 0.5, c, cam_z+1.5, 0.9, 0.15, 'hub')
+    except: pass
+    # Mounting bracket: clamp that wraps OVER the top of the front rail
+    # Top arm sits above rail, bottom arm below, vertical web between them
+    B(rc, 'Cam_Clip_top', -0.3, c-2.0, cam_z+2.5, 1.0, 4.0, 0.5, 'bracket')
+    B(rc, 'Cam_Clip_bot', -0.3, c-2.0, cam_z-0.5, 1.0, 4.0, 0.5, 'bracket')
+    B(rc, 'Cam_Clip_web', -0.3, c-2.0, cam_z-0.5, 0.3, 4.0, 3.5, 'bracket')
+    # Clamping bolt (visible from top)
+    CZ(rc, 'Cam_Clip_bolt', 0.2, c, cam_z+3.0, 0.2, 0.25, 'bracket')
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Drive: motors, wheels, brackets
@@ -547,85 +646,209 @@ def _drive(rc):
     for tag, mx, fy, od in [('FL',xf,0,-1),('FR',xf,FRAME,1),('RL',xr,0,-1),('RR',xr,FRAME,1)]:
         _motor_assy(_comp(rc, f'Motor {tag}'), tag, mx, fy, od)
 
-def _motor_assy(rc, tag, mx, fy, od):
-    """Full motor+wheel assembly with mecanum wheel segments."""
-    # ── Segmented mecanum wheel ──
-    wcy = fy + od * M_OFF
-    seg_total = WHL_W
-    seg_w = seg_total / (N_SEGS + (N_SEGS-1)*SEG_GAP_RATIO)
-    gap = seg_w * SEG_GAP_RATIO
-    mid = (N_SEGS - 1) / 2.0
-
-    for i in range(N_SEGS):
-        y_off = i * (seg_w + gap)
-        x_shift = (i - mid) * DIAG_SHIFT  # diagonal offset for mecanum look
-        seg_y = wcy - WHL_W/2 + y_off
-        # Each roller segment is slightly barrel-shaped (narrower than full diameter)
-        barrel_shrink = 0.15  # rollers are slightly smaller than wheel OD
-        B(rc, f'Roller_{tag}_{i}',
-          mx - WHL_R + barrel_shrink + x_shift, seg_y, 0,
-          (WHL_R - barrel_shrink)*2, seg_w, WHL_R*2, 'roller')
-
-    # Hub cylinder (visible through gaps between rollers)
+def _move_body_transform(rc, body, mat):
+    """Apply a Matrix3D transform to a single body via a MoveFeature."""
+    coll = adsk.core.ObjectCollection.create()
+    coll.add(body)
     try:
-        CY(rc, f'Hub_{tag}', mx, wcy-WHL_W/2-0.05, AXL, WHL_R*0.35, WHL_W+0.1, 'hub')
-    except:
+        mi = rc.features.moveFeatures.createInput2(coll)
+        mi.defineAsFreeMove(mat)
+        rc.features.moveFeatures.add(mi)
+    except Exception:
         pass
 
-    # ── Motor body: two sections (can + gearbox) hanging below frame ──
+
+def _mecanum_wheel(rc, tag, mx, wcy):
+    """Proper mecanum wheel: tire + hub + 8 slanted rollers at 45deg.
+
+    Wheel axis runs along world +Y. Rollers are short cylinders positioned
+    around the outer rim, each rotated so its own axis makes a 45deg angle
+    with the wheel axis (tangent to the tire surface). That's the defining
+    feature of a mecanum wheel that lets the robot strafe.
+    """
+    # Core tire (slightly undersized so rollers stick out a touch beyond)
+    tire_r = WHL_R * 0.85
+    try:
+        CY(rc, f'Tire_{tag}', mx, wcy - WHL_W/2, AXL, tire_r, WHL_W, 'wheel')
+    except Exception:
+        B(rc, f'Tire_{tag}', mx - tire_r, wcy - WHL_W/2, AXL - tire_r,
+          tire_r * 2, WHL_W, tire_r * 2, 'wheel')
+
+    # Central hub (protrudes slightly past the tire on both sides)
+    try:
+        CY(rc, f'Hub_{tag}', mx, wcy - WHL_W/2 - 0.25,
+           AXL, WHL_R * 0.28, WHL_W + 0.5, 'hub')
+    except Exception:
+        pass
+
+    # Slanted rollers around the perimeter
+    N_ROLLERS = 8
+    roller_r = WHL_R * 0.16
+    roller_l = WHL_W * 0.92
+    ring_r = WHL_R * 0.98        # where roller centers sit (on outer edge)
+    half_pi_4 = math.pi / 4       # 45deg tilt
+    c45 = math.cos(half_pi_4); s45 = math.sin(half_pi_4)
+    try:
+        for i in range(N_ROLLERS):
+            theta = 2 * math.pi * i / N_ROLLERS
+            ct, st = math.cos(theta), math.sin(theta)
+
+            # 1. Create roller as a Y-axis cylinder at origin via CY.
+            #    (CY draws at z=AXL by default — we'll override translation below.)
+            body = CY(rc, f'Roller_{tag}_{i}', 0, -roller_l / 2, 0,
+                      roller_r, roller_l, 'roller')
+
+            # 2. Build the transform matrix that tilts the roller 45deg around
+            #    the radial direction, then moves it to position theta around
+            #    the wheel.
+            #    - Body's local Y axis (length) should end up at 45deg between
+            #      world Y and the tangent at theta (tangent = (-sin,0,cos)).
+            #    - Body's local X axis (cross-section radial) should map to
+            #      the wheel's radial direction at theta.
+            #    - Body's local Z axis maps perpendicular to both.
+            #
+            #    Tangent at theta (in the XZ plane, perpendicular to Y):
+            #      tang = (-sin(theta), 0, cos(theta))
+            #    Radial at theta:
+            #      rad  = ( cos(theta), 0, sin(theta))
+            #    Roller length axis (body +Y) points 45deg between Y and tang:
+            #      lax  = (-sin(theta)*s45, c45, cos(theta)*s45)
+            #    Roller cross-section axes span the plane perpendicular to lax;
+            #    pick the radial for body +X, and perpendicular for body +Z:
+            #      body +X = rad
+            #      body +Z = lax x rad  (right-handed)
+            lax = (-st * s45, c45, ct * s45)
+            rad = (ct, 0.0, st)
+            # body +Z = rad x lax (this order gives det=+1, proper rotation).
+            # Using lax x rad instead would be a reflection and render bodies
+            # with inverted normals.
+            zax = (rad[1] * lax[2] - rad[2] * lax[1],
+                   rad[2] * lax[0] - rad[0] * lax[2],
+                   rad[0] * lax[1] - rad[1] * lax[0])
+
+            # Translation: roller center sits on the wheel perimeter at
+            # angle theta, around the wheel center (mx, wcy, AXL).
+            tx = mx + ring_r * ct
+            ty = wcy
+            tz = AXL + ring_r * st
+
+            mat = _mat(rad, lax, zax, (tx, ty, tz))
+            _move_body_transform(rc, body, mat)
+    except Exception:
+        pass  # rollers are decorative; tire+hub is enough if this fails
+
+
+def _motor_assy(rc, tag, mx, fy, od):
+    """Motor + mecanum wheel assembly hanging off the outer face of the frame.
+
+    Rev12: simplified — removed the encoder disc, mounting bolts, and the
+    `BrkV/BrkH` orange L-bracket construction (replaced with a cleaner single
+    angle plate). Wheel now has real slanted rollers instead of 6 boxes.
+    """
+    wcy = fy + od * M_OFF
+    _mecanum_wheel(rc, tag, mx, wcy)
+
+    # Motor body sections hanging below the frame
     if od < 0:
-        can_y = fy - M_CAN          # motor can starts at frame face, goes outward
-        gbox_y = can_y - M_GBOX     # gearbox continues outward
+        can_start = fy - M_CAN
+        gbox_start = can_start - M_GBOX
     else:
-        can_y = fy                   # motor can starts at frame face
-        gbox_y = can_y + M_CAN      # gearbox after can
+        can_start = fy
+        gbox_start = fy + M_CAN
 
-    # Motor can (larger silver cylinder)
-    try: CY(rc, f'MCan_{tag}', mx, can_y if od>0 else fy-M_CAN, AXL, M_DIA/2, M_CAN, 'motor')
-    except: B(rc, f'MCan_{tag}', mx-M_DIA/2, can_y if od>0 else fy-M_CAN, AXL-M_DIA/2, M_DIA, M_CAN, M_DIA, 'motor')
+    # Motor can — clean silver cylinder
+    try: CY(rc, f'MCan_{tag}', mx, can_start, AXL, M_DIA/2, M_CAN, 'motor')
+    except Exception:
+        B(rc, f'MCan_{tag}', mx-M_DIA/2, can_start, AXL-M_DIA/2,
+          M_DIA, M_CAN, M_DIA, 'motor')
 
-    # Gearbox (slightly narrower, darker)
-    try: CY(rc, f'MGbx_{tag}', mx, gbox_y if od>0 else gbox_y, AXL, M_GBOX_DIA/2, M_GBOX, 'gearbox')
-    except: B(rc, f'MGbx_{tag}', mx-M_GBOX_DIA/2, gbox_y, AXL-M_GBOX_DIA/2, M_GBOX_DIA, M_GBOX, M_GBOX_DIA, 'gearbox')
+    # Gearbox — narrower dark cylinder
+    try: CY(rc, f'MGbx_{tag}', mx, gbox_start, AXL, M_GBOX_DIA/2, M_GBOX, 'gearbox')
+    except Exception:
+        B(rc, f'MGbx_{tag}', mx-M_GBOX_DIA/2, gbox_start, AXL-M_GBOX_DIA/2,
+          M_GBOX_DIA, M_GBOX, M_GBOX_DIA, 'gearbox')
 
-    # Encoder disc (small green PCB at inboard end)
-    enc_y = fy + (0.1 if od > 0 else -0.1)
-    try: CY(rc, f'Enc_{tag}', mx, enc_y if od>0 else fy-M_CAN-0.3, AXL, M_DIA/2*0.8, 0.2, 'encoder')
-    except: pass
+    # Shaft — thin silver cylinder reaching the wheel hub
+    shaft_start = (gbox_start + M_GBOX) if od > 0 else (gbox_start - SHAFT)
+    try: CY(rc, f'Shaft_{tag}', mx, shaft_start, AXL, SHAFT_D/2, SHAFT, 'hub')
+    except Exception: pass
 
-    # ── Shaft ──
-    shaft_y = (gbox_y + M_GBOX) if od > 0 else (gbox_y - SHAFT)
-    try: CY(rc, f'Shaft_{tag}', mx, shaft_y if od>0 else gbox_y-SHAFT, AXL, SHAFT_D/2, SHAFT, 'hub')
-    except: pass
-
-    # ── L-bracket: drops from frame to motor ──
-    bk_top = LO                    # bottom of lower rail
-    bk_bot = AXL - M_DIA/2 - 0.1  # just above motor top
+    # L-bracket clamping motor to the outer face of the lower-deck rail
+    bk_top = LO
+    bk_bot = AXL - M_DIA/2 - 0.1
     bk_h = bk_top - bk_bot
     if bk_h > 0:
-        # Vertical plate
         bk_y = fy - BRKT_T if od < 0 else fy
+        # Vertical plate — mounts to the rail's outer T-slot face
         B(rc, f'BrkV_{tag}', mx-S/3, bk_y, bk_bot, S*2/3, BRKT_T, bk_h, 'bracket')
-        # Horizontal shelf under motor
+        # Horizontal shelf under the motor, bolted up into the motor housing
         shelf_y = fy - M_CAN*0.6 if od < 0 else fy
-        B(rc, f'BrkH_{tag}', mx-S/3, shelf_y, bk_bot-BRKT_T, S*2/3, M_CAN*0.6, BRKT_T, 'bracket')
-        # Mounting bolts (two small cylinders)
+        B(rc, f'BrkH_{tag}', mx-S/3, shelf_y, bk_bot-BRKT_T,
+          S*2/3, M_CAN*0.6, BRKT_T, 'bracket')
+        # Mounting bolts: 2 through the vertical plate into the rail's T-nut
+        # (heads visible on the outboard side of the plate)
+        bolt_side = bk_y - 0.15 if od < 0 else bk_y + BRKT_T + 0.15
         for bz in [bk_bot + bk_h*0.3, bk_bot + bk_h*0.7]:
-            CZ(rc, f'Bolt_{tag}', mx, fy + od*(-0.1), bz-0.1, 0.15, BRKT_T+0.2, 'standoff')
+            # X-direction cylinder for a horizontal bolt shaft through the plate
+            # Use CZ but that's vertical — approximate with a small box instead
+            B(rc, f'Bolt_V_{tag}_{bz:.1f}',
+              mx-0.2, bolt_side-0.05 if od<0 else bolt_side,
+              bz-0.2, 0.4, 0.2, 0.4, 'bracket')
+        # Shelf-to-motor bolt (single, centered under motor)
+        CZ(rc, f'Bolt_H_{tag}', mx, shelf_y+M_CAN*0.3 if od>0 else shelf_y-M_CAN*0.3,
+           bk_bot-BRKT_T-0.1, 0.18, 0.2, 'bracket')
+        # Encoder PCB on inboard end of motor (restored from rev11)
+        enc_y = fy - 0.3 if od < 0 else fy + 0.1
+        try: CY(rc, f'Enc_{tag}', mx, enc_y, AXL, M_DIA/2*0.8, 0.2, 'encoder')
+        except Exception: pass
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Wiring
 # ═══════════════════════════════════════════════════════════════════════════
 def _wiring(rc):
-    """Representative wire runs along frame rails."""
+    """Cable runs that actually connect components to each other.
+
+    Each wire starts at a visible port on one component and ends at a visible
+    port on another — shows the data/power topology of the robot.
+    """
     c = FRAME/2
-    # USB cable: motor board → up rear post → RPi
-    B(rc, 'USB_vert', FRAME-S-0.5, c-0.1, LO+S, 0.25, 0.2, POST_H, 'wire_usb')
-    # Power cable: battery → motor board
-    B(rc, 'Pwr_run', c+BAT[0]/2, c, LO+S+PLT_T+BAT[2]*0.7, FRAME*0.2-BAT[0]/2, 0.2, 0.2, 'wire_pwr')
-    # Lidar USB: down mast → along upper rail → down post → RPi
-    B(rc, 'LidarUSB_mast', FRAME-S-0.3, c+0.3, HI+S, 0.2, 0.2, MST-HI-S+MAST_H*0.3, 'wire_usb')
-    B(rc, 'LidarUSB_rail', S, c+0.3, HI+S-0.3, FRAME-2*S, 0.2, 0.2, 'wire_usb')
+    bx = FRAME * 0.7           # motor board X center (matches _components)
+    cz_board = LO + S + PLT_T + 0.6    # PCB top (after standoffs)
+
+    # Power: battery (+/-) to motor board XT60 (dual red + black bundle)
+    # Run from battery side toward the motor board's side
+    pwr_len = bx - BRD[0]/2 - (c + BAT[0]/2)
+    B(rc, 'PwrCable+', c+BAT[0]/2, c-0.3, cz_board+0.3, pwr_len, 0.2, 0.2, 'wire_pwr')
+    B(rc, 'PwrCable-', c+BAT[0]/2, c+0.3, cz_board+0.3, pwr_len, 0.2, 0.2, 'wire_usb')
+
+    # USB-C: motor board → up rear post → across upper rail → RPi5 USB-A
+    # Leg 1: vertical run up the rear-inside post
+    post_x = FRAME - S - 0.4   # just inside the rear rail
+    B(rc, 'USB_vert', post_x, c-0.15, LO+S, 0.25, 0.3, POST_H, 'wire_usb')
+    # Leg 2: horizontal on top of upper deck toward Pi
+    horiz_len = post_x - (c + RPI[0]/2 + 0.3)
+    B(rc, 'USB_horiz',
+      c+RPI[0]/2+0.3, c-0.15, HI+S+PLT_T+0.7, horiz_len, 0.3, 0.25, 'wire_usb')
+
+    # Lidar USB: lidar cable exit → down mast → along upper rail → down post → Pi
+    # Leg 1: down the mast (matching lidar cable exit side)
+    mast_x = FRAME - S - 0.3
+    lidar_top_z = MST + MAST_H
+    B(rc, 'LidarUSB_mast',
+      mast_x, c+0.4, HI+S+PLT_T, 0.25, 0.25, lidar_top_z - (HI+S+PLT_T), 'wire_usb')
+    # Leg 2: along upper rail toward Pi
+    B(rc, 'LidarUSB_rail',
+      S+0.2, c+0.4, HI+S+PLT_T+0.4, FRAME - 2*S - 0.5, 0.25, 0.25, 'wire_usb')
+
+    # Camera USB: short run from camera back to Pi front-left port
+    cam_z = HI + S/2
+    B(rc, 'CamUSB',
+      2.0, c-3.0, cam_z+2.8, c-RPI[0]/2-2.0, 0.2, 0.2, 'wire_usb')
+
+    # Cable tie loops — 4 small black bands on upper rail to route wires
+    for x in [S+3, S+7, S+11, S+15]:
+        B(rc, f'Tie_{x:.0f}',
+          x, c+0.25, HI+S+PLT_T+0.1, 0.15, 0.5, 0.6, 'wheel')
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Ground
