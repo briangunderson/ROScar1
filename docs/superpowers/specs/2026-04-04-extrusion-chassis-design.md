@@ -131,14 +131,29 @@ ground. The frame rail height follows from the bracket geometry. Expected:
 rail bottom at ~15-25mm above ground (15-25mm ground clearance).
 ```
 
-**Stability polygon (updated with motor measurements):**
+**Stability polygon (CAD-verified 2026-04-17):**
 
-Motor offset per side: ~35mm (bracket ~3mm + motor face clearance + 13mm shaft + 18.7mm half-wheel-width).
-- Track width: **~320mm** (250mm frame + 2×35mm) vs. current 205mm → **+56% wider**
-- Wheelbase: **~200mm** (motors at ±100mm from center along frame rails) vs. current 96.5mm → **+107% longer**
-- Stability polygon area: **~64,000mm²** vs. current ~19,800mm² → **3.2× larger**
+Motor mounting configuration (from the Fusion 360 script, matching the physical robot):
+  - Motor body is mounted HORIZONTALLY (output shaft axis along Y, parallel to wheel rotation axis)
+  - Motor hangs BELOW the lower deck rails, with its body extending OUTBOARD from each frame face
+  - L-bracket clamps the motor body to the outer face of the lower deck rail via T-nuts
 
-The adjustable T-slot motor brackets allow fine-tuning these values without reprinting.
+Motor offset per side from frame face to wheel center (**M_OFF**):
+  - Motor can body: 38mm
+  - Gearbox: 24mm
+  - Shaft protrusion: 13mm
+  - Half wheel width: 18.65mm
+  - **Total M_OFF ≈ 93.6mm**
+
+Resulting chassis footprint:
+- **Track width: ~435mm** (= 248mm frame + 2 × 93.6mm) vs. current 205mm → **+112% wider**
+- **Wheelbase: ~200mm** (motors at ±100mm from frame center along X axis) vs. current 96.5mm → **+107% longer**
+- **Stability polygon area: ~87,000mm²** vs. current ~19,800mm² → **4.4× larger**
+- Outer-to-outer wheel span (including 37.3mm wheel width): ~472mm — fits through any standard doorway (≥711mm interior) with >100mm clearance per side.
+
+Earlier drafts of this spec quoted ~320mm track width using M_OFF≈35mm. That number was incorrect — it omitted the 62mm motor body length from the offset calculation. The CAD model has always reflected the ~435mm reality. Corrected here after the 2026-04-17 CAD audit.
+
+The motor L-bracket slides in the rail's T-slot, so small track/wheelbase fine-tuning is possible without reprinting brackets.
 
 ### 4.3 Center of Gravity Analysis
 

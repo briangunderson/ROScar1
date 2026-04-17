@@ -83,9 +83,11 @@ Stock preserved (don't cut these today):
 
 After cutting, the assembled frame should be:
 - **248mm × 248mm** outer footprint (per deck)
-- **100mm** deck-to-deck spacing (post length)
+- **100mm** deck-to-deck spacing (post length between top of lower rail and bottom of upper rail)
 - **120mm** mast above the upper deck
-- **Total chassis height** from lower rail bottom to lidar mast top: ~267mm (plus ~40mm for the lidar body above that)
+- **Lower rail bottom → mast top: 280mm** (= 30mm lower rail + 100mm post + 30mm upper rail + 120mm mast)
+- **Ground → mast top: ~364mm** (lower rail bottom sits ~84mm above ground to clear the 80mm wheels + a 5mm safety margin)
+- **Ground → lidar top: ~406mm** (add ~41mm lidar body above the mast)
 
 If the post length is right but the frame doesn't sit square, check that the 248mm rails are exactly equal and the 188mm rails are exactly equal. Any mismatch within a pair will force the frame to be rhomboid.
 
