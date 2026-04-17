@@ -121,11 +121,13 @@ N_SEGS = 6;  SEG_GAP_RATIO = 0.12;  DIAG_SHIFT = 0.15  # cm shift per segment
 # Color palette
 # ═══════════════════════════════════════════════════════════════════════════
 PAL = {
-    # rev12: palette tuned for visual legibility over engineering detail.
-    # Frame is now anodized aluminum so the 3030 skeleton reads as structure;
-    # brackets are subordinate gunmetal instead of loud orange; deck plates
-    # are warm amber so they look like real PCB/acrylic instead of institutional blue.
-    'frame':    (185, 190, 200),   # anodized aluminum silver
+    # rev13: palette matches the physical inventory. Stock is BLACK anodized
+    # 3030 (not silver — Brian's 500mm + 400mm sticks are all black per the
+    # BOM), so the frame rails/posts/mast are near-black. Corner brackets are
+    # a lighter anodized gray-silver (the real ones he has on hand are
+    # typically silver or raw aluminum). Deck plates are warm tan (clear
+    # acrylic or G10) to pop against the dark frame.
+    'frame':    (35, 37, 42),      # black anodized 3030 stock (matches real)
     'plate':    (215, 180, 120),   # warm tan acrylic / amber G10
     'battery':  (40, 95, 175),     # battery blue
     'pcb':      (35, 90, 55),      # PCB green
@@ -136,13 +138,13 @@ PAL = {
     'roller':   (55, 58, 65),      # roller darker gray
     'lidar':    (30, 30, 38),      # lidar dark
     'camera':   (50, 50, 58),      # camera body
-    'bracket':  (90, 95, 105),     # gunmetal (was loud orange)
-    'corner':   (130, 135, 145),   # corner brackets slightly lighter than frame
-    'ground':   (75, 80, 88),      # warm gray floor (was near-black)
+    'bracket':  (230, 120, 30),    # orange (motor L-brackets) — pops against black frame
+    'corner':   (175, 180, 190),   # silver/raw-aluminum 3-way corner brackets
+    'ground':   (85, 90, 98),      # warm gray floor
     'hub':      (135, 140, 150),   # wheel hub
-    'standoff': (185, 190, 200),   # standoffs match frame
+    'standoff': (185, 190, 200),   # standoffs silver-ish
     'lens':     (180, 190, 210),   # camera/lidar lens glass
-    # Kept for backward compatibility (no longer used in rev12):
+    # Kept for backward compatibility:
     'wire_pwr': (180, 30, 30), 'wire_usb': (40, 40, 45), 'wire_enc': (30, 130, 30),
     'port':     (35, 35, 40), 'encoder':  (25, 70, 25),
 }
@@ -257,9 +259,17 @@ def _check_centered(occ, label):
 
     All transform math assumes the STEP extrusion has its cross-section
     centered at origin (±S/2). This warns if that assumption is wrong.
+
+    IMPORTANT: check the BODY's bounding box in component-local space, NOT
+    the occurrence's bounding box in world space. occ.boundingBox would be
+    post-transform (after we've already translated the rail to its world
+    position) and would always falsely flag non-origin positions.
     """
     try:
-        bb = occ.boundingBox
+        comp = occ.component
+        if comp.bRepBodies.count == 0:
+            return
+        bb = comp.bRepBodies.item(0).boundingBox
         cx = (bb.minPoint.x + bb.maxPoint.x) / 2
         cz = (bb.minPoint.z + bb.maxPoint.z) / 2
         if abs(cx) > 0.1 or abs(cz) > 0.1:
