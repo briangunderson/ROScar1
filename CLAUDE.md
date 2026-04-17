@@ -656,3 +656,33 @@ The EKF uses `imu/data_raw` directly (bypassing Madgwick filter) for angular vel
 - [x] Dashboard: fix reset button crash (add 6s shutdown delay, clear markers before restart)
 - [ ] Verify landmark drift correction end-to-end (markers learn correctly, correction needs real-world testing)
 - [ ] Add landmark_localizer to navigation.launch.py with `load_learned: true`
+- [ ] **Chassis v2**: Design and build new 3030 aluminum extrusion chassis (spec: `docs/superpowers/specs/2026-04-04-extrusion-chassis-design.md`)
+
+## Chassis v2 Design (Parallel Development)
+
+A new two-deck aluminum extrusion chassis is being designed to replace the current metal plate. **This work is isolated from the main codebase** — no existing files are modified until the physical build is complete.
+
+**Design spec:** `docs/superpowers/specs/2026-04-04-extrusion-chassis-design.md`
+**3D scan of motor bracket:** [Polycam](https://poly.cam/capture/47BED671-7E69-465D-95AC-22A8A67D7DB1)
+
+### Key Design Decisions
+- **3030 extrusion** as primary structural material (matches existing inventory)
+- **Two-deck sandwich** — lower deck for battery/motors/board, upper deck for RPi5/camera
+- **Lidar on a short mast** (120mm) at center-rear of upper deck
+- **Motors hang BELOW frame** on L-brackets (confirmed from robot photos 2026-04-05) — NOT inside the frame
+- **3D-printed motor brackets** (PETG, parametric) clamp to frame exterior for adjustable track/wheelbase
+- **3-way corner brackets** at all 8 frame-to-post joints (no L-brackets needed for primary structure)
+- **Frame: ~250×250mm square** from 3030 extrusion
+- **Estimated total weight: ~4.9kg** (vs current 3.0kg — heavier but much more stable)
+- **CoG at ~29% of total height** (vs current ~50-60% — major stability improvement)
+
+### Fusion 360 Model
+- **Script:** `docs/chassis/fusion360/roscar_v2_chassis.py` (rev8b — needs testing)
+- **Current state:** Assembled model with colors, T-slot profiles, cylindrical wheels/motors, motor mounting below frame
+- **CRITICAL:** All geometry must use XY construction plane ONLY — XZ/YZ planes have axis mapping bugs
+- **Session handoff:** `tasks/chassis-v2-handoff.md` has full context for continuing this work
+
+### Known Risks
+- STM32 firmware has hardcoded mecanum geometry — changing track/wheelbase means odometry errors until firmware is reflashed
+- Motor board IMU axis corrections may need updating if board orientation changes
+- Laser filter threshold may need adjustment for new lidar height
