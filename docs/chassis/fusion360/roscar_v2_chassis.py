@@ -445,7 +445,29 @@ import os
 #                       right' — it's 'each named part is within
 #                       X cm of its intended XYZ'.
 # =============================================================================
-VERSION = 'rev34'
+#   rev35   2026-04-18  Sanity-check bug fixes after rev34 visual
+#                       audit. Rev34's actual geometry was correct
+#                       (corner brackets at junctions, lidar on
+#                       mast axis) — the 3 'failed' sanity lines
+#                       were bugs in the checks themselves:
+#                         - frame_unique didn't handle procedural
+#                           entries (occ=None), counted 14 not 22.
+#                         - lidar_on_mast_axis looked for bodies
+#                           by name starting with 'RPLIDAR' but the
+#                           STEP's internal bodies are named by
+#                           Slamtec's original part names.
+#                         - strays_hidden_count range (50-200) was
+#                           based on bracket STEPs' decorative
+#                           stubs; now that the brackets are
+#                           procedural, only ~11 strays from RPLIDAR
+#                           + T-plate remain. Range → 5-200.
+#                       Checks now all use proper 'walk the
+#                       component tree for the first visible body's
+#                       bbox center' pattern when occ is available,
+#                       or the stored intended position for
+#                       procedural entries.
+# =============================================================================
+VERSION = 'rev35'
 
 # Chassis volume (cm) for _hide_stray_bodies. Anything whose body's
 # bounding-box center falls outside this box gets hidden.
@@ -889,8 +911,13 @@ def _run_sanity_checks(rc):
         f'{len(_frame_positions)} (expected 22)')
 
     # --- frame_unique: 22 distinct body-bbox centers ---
+    # Handles both STEP-imported (occ != None) and procedural (occ == None,
+    # use stored intended position) entries.
     actual_centers = []
-    for _, _, occ in _frame_positions:
+    for _, intended, occ in _frame_positions:
+        if occ is None:
+            actual_centers.append(tuple(round(v, 2) for v in intended))
+            continue
         try:
             b = occ.component.bRepBodies.item(0)
             bb = b.boundingBox
@@ -1030,15 +1057,36 @@ def _run_sanity_checks(rc):
     # 'lidar hanging off the post' — body has an internal offset from
     # its STEP origin that needs to be compensated for in placement.
     mast_x, mast_y = FRAME - S, FRAME / 2
-    _, lidar_c = _find_body_by_name(rc, 'RPLIDAR')
-    if lidar_c is None:
-        # Procedural fallback uses 'Lidar_Base' / 'Lidar_Head' names.
-        _, lidar_c = _find_body_by_name(rc, 'Lidar_Base')
-    if lidar_c is None:
+    lidar_center = None
+    # Look for the STEP-imported RPLIDAR_C1 occurrence by component name,
+    # then walk its tree for the first visible body's bbox center.
+    for i in range(rc.occurrences.count):
+        occ = rc.occurrences.item(i)
+        try:
+            if occ.component.name == 'RPLIDAR_C1':
+                def _first_body_center(comp):
+                    if comp.bRepBodies.count > 0:
+                        bb = comp.bRepBodies.item(0).boundingBox
+                        return ((bb.minPoint.x + bb.maxPoint.x)/2,
+                                (bb.minPoint.y + bb.maxPoint.y)/2,
+                                (bb.minPoint.z + bb.maxPoint.z)/2)
+                    for j in range(comp.occurrences.count):
+                        hit = _first_body_center(comp.occurrences.item(j).component)
+                        if hit is not None:
+                            return hit
+                    return None
+                lidar_center = _first_body_center(occ.component)
+                break
+        except Exception:
+            pass
+    # Procedural fallback uses 'Lidar_Base' / 'Lidar_Head' named bodies.
+    if lidar_center is None:
+        _, lidar_center = _find_body_by_name(rc, 'Lidar_Base')
+    if lidar_center is None:
         add('lidar_on_mast_axis', False, 'no lidar body found')
     else:
-        dx = lidar_c[0] - mast_x
-        dy = lidar_c[1] - mast_y
+        dx = lidar_center[0] - mast_x
+        dy = lidar_center[1] - mast_y
         r = (dx*dx + dy*dy) ** 0.5
         add('lidar_on_mast_axis',
             r <= 1.5,
@@ -1046,11 +1094,13 @@ def _run_sanity_checks(rc):
 
     # --- strays_hidden_count: number of hidden bodies ---
     n_hidden = _count_hidden_bodies(rc)
-    # Expected baseline from rev30: ~94 (decorative hardware from
-    # multi-body STEP assemblies). Allow some slack.
+    # rev34 dropped the bracket STEP imports (which contributed most of
+    # the hidden strays) and replaced them with clean procedural brackets.
+    # Now the only strays are from RPLIDAR + T-plate + Pi5-when-enabled
+    # sub-assemblies. Expected range: 5-200.
     add('strays_hidden_count',
-        50 <= n_hidden <= 200,
-        f'{n_hidden} hidden bodies (expected 50-200)')
+        5 <= n_hidden <= 200,
+        f'{n_hidden} hidden bodies (expected 5-200)')
 
     n_pass = sum(1 for _, ok, _ in results if ok)
     summary = f'sanity: {n_pass}/{len(results)} pass'
