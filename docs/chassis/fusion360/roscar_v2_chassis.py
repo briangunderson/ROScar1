@@ -281,12 +281,36 @@ import os
 #                       Works cleanly when sub-occurrences are at
 #                       identity (typical for imported STEP assemblies);
 #                       may deform if a sub-occurrence has a non-
-#                       identity transform, but for the bracket /
-#                       T-plate / Pi5 / lidar STEPs in our collection
-#                       the nesting is flat and sub-transforms are
-#                       identity, so rigid translation holds.
+#                       identity transform. Result: 22/22 placements
+#                       at unique positions, 20/22 at intended world
+#                       coords. Corner brackets, rails, posts, mast,
+#                       T-plate, RPLIDAR all land correctly.
+#   rev29   2026-04-18  Disable the RPi5 STEP import by default and
+#                       fall back to the procedural PCB block. The
+#                       raspberrypi.com Pi5 STEP is a deeply nested
+#                       assembly (47 bodies across multiple levels
+#                       with non-identity sub-occurrence transforms)
+#                       and rev28's recursive body-move doesn't
+#                       translate it rigidly — the geometry ends up
+#                       at negative Z (below the ground plane),
+#                       which blows up the viewport fit. The
+#                       procedural block is the right stand-in
+#                       until we either switch the Pi5 geometry to
+#                       an add-as-instance approach or use the
+#                       Argon NEO 5 case STEP (once the user sources
+#                       it from GrabCAD).
+#                       USE_RPI5_STEP flag lets future runs re-enable
+#                       the real STEP for experimentation without
+#                       editing multiple lines.
 # =============================================================================
-VERSION = 'rev28'
+VERSION = 'rev29'
+
+# Set to False to force the procedural Pi5 PCB block instead of the
+# real STEP import. Rev28's recursive body-move couldn't rigidly
+# translate the Pi5 STEP (nested assembly with non-identity
+# sub-occurrence transforms), so the default is False until a better
+# approach lands.
+USE_RPI5_STEP = False
 
 # Setting this to False before calling run() suppresses the final
 # summary ui.messageBox (a modal dialog that blocks on the main thread).
@@ -1029,12 +1053,11 @@ def _components(rc, root=None):
     bx = FRAME * 0.7
     B(rc, 'MotorBoard', bx-BRD[0]/2, c-BRD[1]/2, cz, BRD[0], BRD[1], BRD[2], 'pcb')
 
-    # ── RPi5: import real STEP if available, else fall back to placeholder ──
+    # ── RPi5: import real STEP if USE_RPI5_STEP=True and file exists,
+    # otherwise use the procedural PCB block. See rev29 notes for why
+    # the STEP import is disabled by default.
     rz = HI + S + PLT_T
-    if os.path.exists(STEP_RPI5):
-        # Real Raspberry Pi 5 CAD from raspberrypi.com. PCB is 85 x 56 mm.
-        # Imported into ROOT so occurrence.transform actually places it
-        # where we ask. Initial guess: PCB origin at upper-deck center.
+    if USE_RPI5_STEP and os.path.exists(STEP_RPI5):
         try:
             rpi_occ = _import_step(root, STEP_RPI5, 'RPi5')
             _clr_occ(rpi_occ, 'rpi')
