@@ -144,8 +144,17 @@ import os
 #                       making it hard to tell bracket from rail. Brass
 #                       is maximally visually distinct and reads as a
 #                       commodity hardware color.
+#   rev19   2026-04-17  Rewrote _hide_bracket_stubs() to use body SIZE as
+#                       the primary filter instead of component names (which
+#                       weren't reliably matching due to STEP importer
+#                       flattening). Now hides any body > 5cm in any
+#                       bounding-box dimension — that captures stub
+#                       extrusions (100mm) while keeping the bracket body
+#                       (30mm) and grub screws (10mm) visible. Also still
+#                       does name matching as a backup for nested
+#                       sub-occurrences.
 # =============================================================================
-VERSION = 'rev18'
+VERSION = 'rev19'
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Dimensions (cm) — multiply mm by 0.1
@@ -525,21 +534,43 @@ def _import_bracket(rc, step_path, name, c0, c1, c2, t, color='corner',
     return occ
 
 
-def _hide_bracket_stubs(comp):
-    """Turn off visibility of any sub-occurrence that looks like a stub
-    extrusion (imported by some bracket STEPs as a decorative body).
+def _hide_bracket_stubs(comp, max_body_len_cm=5.0):
+    """Turn off visibility of any body that's too long to be a bracket body
+    or grub screw — those are the decorative stub extrusions that overlap
+    the real structural rails/posts.
 
-    Matches on component name containing 'profile' or 'extrusion'. Applies
-    recursively to handle arbitrary assembly nesting.
+    Real 3-way corner bracket body is <= 30x30x30 mm (3cm max).
+    M6 grub screws are <= 10mm long.
+    Stub extrusions are ~100mm (10cm) long.
+    Threshold default of 5cm comfortably separates them.
+
+    Walks the imported component tree recursively — also checks bodies in
+    nested sub-occurrences (Fusion's STEP importer puts assembly parts in
+    sub-components).
     """
     try:
+        # Hide direct bodies over the length threshold
+        for i in range(comp.bRepBodies.count):
+            body = comp.bRepBodies.item(i)
+            try:
+                bb = body.boundingBox
+                dx = bb.maxPoint.x - bb.minPoint.x
+                dy = bb.maxPoint.y - bb.minPoint.y
+                dz = bb.maxPoint.z - bb.minPoint.z
+                if max(dx, dy, dz) > max_body_len_cm:
+                    body.isLightBulbOn = False
+            except Exception:
+                pass
+        # Recurse into sub-components
         for i in range(comp.occurrences.count):
             child = comp.occurrences.item(i)
+            # Also name-match for good measure (some importers flatten bodies
+            # into sub-occurrences)
             name = (child.component.name or '').lower()
             if 'profile' in name or 'extrusion' in name or 't-slot' in name:
                 child.isLightBulbOn = False
             else:
-                _hide_bracket_stubs(child.component)
+                _hide_bracket_stubs(child.component, max_body_len_cm)
     except Exception:
         pass
 
