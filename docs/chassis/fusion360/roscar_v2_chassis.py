@@ -380,8 +380,28 @@ import os
 #                       the rail (at Y=0 for front) and the
 #                       far-end plate_v (at Y=-6.2), supported
 #                       underneath by the horizontal arm.
+#   rev33   2026-04-18  Fix upper-deck corner brackets visibly
+#                       poking ABOVE the upper deck plate.
+#                       Rev22-32 used (_Y, _X, _NZ) for upper
+#                       brackets hoping to flip the Z-arm so it
+#                       extends DOWN into the post. But the
+#                       rev31 diagnostics showed bracket
+#                       body_center at local (1.25, 6.26, -3.44):
+#                       material is at local +X, +Y, and -Z.
+#                       Under (_Y, _X, _NZ), local -Z (where the
+#                       body lives) maps to world +Z — sending
+#                       the body UP from the placement point.
+#                       Applied at (0, 0, HI=21.44), the body
+#                       ends up at z=24.88, ABOVE the upper
+#                       deck plate (24.44). Visible bug.
+#                       Fix: use the SAME per-corner rotations
+#                       as the lower deck brackets. With c2=_Z
+#                       the local -Z material stays at world -Z,
+#                       so the upper bracket body extends DOWN
+#                       from HI to z=18.0 — fully inside the
+#                       post region. No material above the deck.
 # =============================================================================
-VERSION = 'rev32'
+VERSION = 'rev33'
 
 # Chassis volume (cm) for _hide_stray_bodies. Anything whose body's
 # bounding-box center falls outside this box gets hidden.
@@ -1282,11 +1302,17 @@ def _frame(rc):
     _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_FR', _NY, _X,  _Z, (0,     FRAME, LO + S))
     _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_RL', _Y,  _NX, _Z, (FRAME, 0,     LO + S))
     _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_RR', _NX, _NY, _Z, (FRAME, FRAME, LO + S))
-    # Upper deck brackets — Z flipped
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_FL', _Y,  _X,  _NZ, (0,     0,     HI))
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_FR', _X,  _NY, _NZ, (0,     FRAME, HI))
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_RL', _NX, _Y,  _NZ, (FRAME, 0,     HI))
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_RR', _NY, _NX, _NZ, (FRAME, FRAME, HI))
+    # Upper deck brackets — rev33: use the SAME per-corner rotations as
+    # the lower-deck brackets (no Z-flip). The bracket STEP's body
+    # material is at local (+X, +Y, -Z). Identity-Z rotation keeps the
+    # body at world -Z from the placement point, which for placement
+    # at Z=HI sends the body DOWN into the post (z range ~[18.0, 21.44]).
+    # That's the right direction — the upper bracket clasps the post
+    # from ABOVE by extending DOWN.
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_FL', _X,  _Y,  _Z, (0,     0,     HI))
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_FR', _NY, _X,  _Z, (0,     FRAME, HI))
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_RL', _Y,  _NX, _Z, (FRAME, 0,     HI))
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_RR', _NX, _NY, _Z, (FRAME, FRAME, HI))
 
     # --------------------------------------------------------------------
     # T-plate bracket for lidar mast attachment to rear upper rail.
