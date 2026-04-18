@@ -78,3 +78,48 @@ of mistake as the rev23 dialog.
 
 Checks live in the `_SANITY_CHECKS` list at the bottom of
 `roscar_v2_chassis.py` so they move with the script.
+
+## Visual sanity check (EVERY rev)
+
+Automated checks can't catch "it looks wrong." Claude must ALSO
+take a fresh viewport screenshot after every iteration and walk
+this list by eye:
+
+### Overall form
+- Chassis reads as a robot (deck plates, frame, wheels, motors all present)
+- No stray specks floating outside the chassis volume
+- Colors correct: silver rails, brass brackets, tan plates, orange motor brackets
+
+### Frame
+- 8 silver 3030 rails visible, forming 2 horizontal rectangles (upper + lower)
+- 4 vertical silver posts at the corners connecting the decks
+- Mast rises from the rear with the T-plate + RPLIDAR on top
+
+### Corner brackets
+- 8 brass brackets, one at each rail-rail-post junction
+- Lower-deck brackets: Z-arm extends UP into the post (above LO+S)
+- Upper-deck brackets: Z-arm extends DOWN into the post (below HI)
+- NO bracket material poking above the upper deck plate
+- X and Y arms extend horizontally along the adjacent rails
+
+### Wheels
+- 4 wheels visible at the corners
+- Each wheel has visible mecanum rollers (not a solid black disk)
+- Wheels sit below the chassis with their outer edge flush with or just beyond the rail face
+
+### Motor assemblies
+- 4 motor cans visible, one per corner
+- Each motor rests on the horizontal shelf of its L-bracket (no gap)
+- Vertical L-bracket plate is bolted to the outer face of the adjacent rail (plate covers the rail face)
+- Orange gusset rib visible in the inside corner of the L
+
+### Deck plates + electronics
+- 2 tan plates, one at LO+S and one at HI+S
+- Each plate has 4 bolt heads at its corners
+- Blue battery + green motor board visible on the lower deck
+- Black Pi5 block (procedural) visible on the upper deck
+
+### Reporting
+Write the visual check result as a short bullet list per rev (PASS
+items and FAIL items). Attach the screenshot. Fail items become
+rev+1 targets.

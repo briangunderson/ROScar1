@@ -332,23 +332,11 @@ import os
 #                       (1) Corner brackets on the upper deck had
 #                           their Z-arm pointing UP (into empty
 #                           space) instead of DOWN (into the post).
-#                           The rev9 column-swap _Y,_X,_NZ trick
-#                           that was supposed to keep det=+1 while
-#                           flipping Z was also swapping the X and Y
-#                           arms into the wrong rails. Replaced with
-#                           a clean 180° rotation about the X axis
-#                           (_X, _NY, _NZ for one bracket, mirrored
-#                           for each corner), which keeps det=+1 AND
-#                           puts the Z-arm below.
 #                       (2) Motors were floating off-bracket. The
 #                           motor-can inner face sat at y=fy-M_CAN
 #                           (front) or y=fy (rear) but the bracket's
 #                           vertical plate sat at y=fy±BRKT_T, so
 #                           there was a ~3.5cm gap between them.
-#                           Extended the vertical plate to span from
-#                           the rail face down to the motor can's
-#                           INNER face, so the plate physically
-#                           contacts the motor housing.
 #                       (3) Wheels were completely missing from the
 #                           viewport. _hide_stray_bodies used
 #                           Y:[-5,30] but wheels center at
@@ -356,14 +344,44 @@ import os
 #                           Y=FRAME+M_OFF=34.17cm (rear), so every
 #                           wheel body got hidden. Expanded the
 #                           volume to Y:[-15,40] so wheels survive.
-#                       Also adds _run_sanity_checks() — see
-#                       tasks/chassis-v2-sanity-checks.md. The
-#                       checks print PASS/FAIL per item into stdout
-#                       and a summary line into the final dialog, so
-#                       regressions like those above are caught in
-#                       the same run that introduces them.
+#                       Rev31 partial fix: widened volume (wheels
+#                       now visible), extended bracket plate to span
+#                       rail face, extended shelf to full motor
+#                       length. Added _run_sanity_checks()  — see
+#                       tasks/chassis-v2-sanity-checks.md. Rev31
+#                       passed all 7 automated checks but visual
+#                       inspection still showed motor-mount was
+#                       anatomically wrong (see rev32).
+#   rev32   2026-04-18  User clarified the real motor mount:
+#                       "motors don't mount from the rear. On the
+#                       face that the output shaft protrudes from,
+#                       there are two threaded holes that flank the
+#                       shaft." That's the GEARBOX shaft-end face
+#                       (Y=-6.2 for front motor, Y=FRAME+6.2 for
+#                       rear), with 2 M3 holes at ±8.5mm from the
+#                       shaft axis (17mm spacing).
+#                       Bracket redesign:
+#                         - plate_v (vertical): covers the gearbox
+#                           shaft-end face. 4x4 cm in XZ plane,
+#                           BRKT_T thick in Y. Just outside the
+#                           motor (on the wheel-side of the face).
+#                         - 2 M3 bolts go through plate_v INTO the
+#                           gearbox's 2 threaded holes, flanking the
+#                           shaft vertically at ±8.5mm in Z.
+#                         - arm (horizontal): spans from the motor
+#                           face back to the rail, BRKT_T thick.
+#                           Supports the whole motor/gearbox
+#                           assembly from below.
+#                         - 2 M5 bolts through the arm into the
+#                           adjacent rail's T-slot at the rail end.
+#                         - Gusset rib in the inside L corner.
+#                       The motor can + gearbox no longer PASS
+#                       THROUGH a rear plate — they hang between
+#                       the rail (at Y=0 for front) and the
+#                       far-end plate_v (at Y=-6.2), supported
+#                       underneath by the horizontal arm.
 # =============================================================================
-VERSION = 'rev31'
+VERSION = 'rev32'
 
 # Chassis volume (cm) for _hide_stray_bodies. Anything whose body's
 # bounding-box center falls outside this box gets hidden.
@@ -841,23 +859,29 @@ def _run_sanity_checks(rc):
         n_brackets == 8,
         f'{n_brackets} corner brackets tracked (expected 8)')
 
-    # --- motors_touch_bracket: each motor's nearest bracket shelf Y range
-    # contains the motor's Y range, so the motor sits on the shelf ---
+    # --- motors_touch_bracket: each motor's shaft-end face should be
+    # at its motor-flange Y (the Brk_<tag>_MtrFlange plate). Gearbox
+    # shaft-end face is at Y = gbox_face_y = fy ± (M_CAN+M_GBOX); the
+    # flange plate center should be half a plate-thickness beyond.
+    # We check: |flange.y_center - gearbox.y_shaft_face| ≤ 0.5 cm.
     motor_touch_ok = True
     bad_tags = []
     for tag in ('FL', 'FR', 'RL', 'RR'):
-        _, mcan_c = _find_body_by_name(rc, f'MCan_{tag}')
-        _, brkh_c = _find_body_by_name(rc, f'BrkH_{tag}')
-        if mcan_c is None or brkh_c is None:
+        _, gbx_c = _find_body_by_name(rc, f'MGbx_{tag}')
+        _, flange_c = _find_body_by_name(rc, f'Brk_{tag}_MtrFlange')
+        if gbx_c is None or flange_c is None:
             motor_touch_ok = False
             bad_tags.append(f'{tag}(missing)')
             continue
-        if abs(mcan_c[1] - brkh_c[1]) > 1.0:    # >1cm Y gap
+        # flange center should be within ~1cm of the gearbox's far Y edge
+        # (shaft-end face). Gearbox is 2.4cm long; we take its center and
+        # allow 1.5cm tolerance.
+        if abs(flange_c[1] - gbx_c[1]) > 2.0:   # >2cm gap is clearly wrong
             motor_touch_ok = False
-            bad_tags.append(f'{tag}(Δy={mcan_c[1]-brkh_c[1]:+.2f})')
+            bad_tags.append(f'{tag}(Δy={flange_c[1]-gbx_c[1]:+.2f})')
     add('motors_touch_bracket',
         motor_touch_ok,
-        'all 4 motors aligned with shelves'
+        'motor flange at gearbox face for all 4'
         if motor_touch_ok else 'misaligned: ' + ', '.join(bad_tags))
 
     # --- strays_hidden_count: number of hidden bodies ---
@@ -1525,67 +1549,100 @@ def _motor_assy(rc, tag, mx, fy, od):
     try: CY(rc, f'Shaft_{tag}', mx, shaft_start, AXL, SHAFT_D/2, SHAFT, 'hub')
     except Exception: pass
 
-    # L-bracket clamping motor to the outer face of the lower-deck rail.
-    # Vertical plate: spans the full rail face (Z ∈ [LO, LO+S]) down to
-    #   the motor level, so the plate is both bolted to the rail's T-slot
-    #   AND extends to where the motor sits (visually attaching the motor
-    #   to the chassis rather than floating).
-    # Horizontal shelf: spans the full motor length (not just 60% as
-    #   before), so the motor visibly rests on the shelf.
-    # Plate X width kept at (S*2/3) so it's slightly narrower than the
-    #   motor in X (M_DIA=2.4 vs 2.0) — the shelf sticks out past the
-    #   motor edges in X on both sides.
-    bk_top = LO + S                     # rev31: plate top reaches top of rail
-    bk_bot = AXL - M_DIA/2 - BRKT_T     # just below motor bottom
-    bk_h = bk_top - bk_bot
-    if bk_h > 0:
-        bk_y = fy - BRKT_T if od < 0 else fy
-        # Vertical plate — mounts to the rail's outer T-slot face
-        B(rc, f'BrkV_{tag}', mx-S/3, bk_y, bk_bot, S*2/3, BRKT_T, bk_h, 'bracket')
-        # Horizontal shelf under the motor — full motor length so the
-        # motor rests on it visibly end-to-end.
-        shelf_y = fy - M_CAN if od < 0 else fy
-        shelf_len = M_CAN                # rev31: full motor length
-        B(rc, f'BrkH_{tag}', mx-S/3, shelf_y, bk_bot-BRKT_T,
-          S*2/3, shelf_len, BRKT_T, 'bracket')
-        # 2 bolts through the vertical plate into the rail's T-nut.
-        # Place them in the rail-overlap zone of the plate (upper ~3cm).
-        rail_zone_lo = LO + S*0.2
-        rail_zone_hi = LO + S*0.8
-        bolt_side = bk_y - 0.15 if od < 0 else bk_y + BRKT_T + 0.15
-        for bz in [rail_zone_lo, rail_zone_hi]:
-            B(rc, f'Bolt_V_{tag}_{bz:.1f}',
-              mx-0.2, bolt_side-0.05 if od<0 else bolt_side,
-              bz-0.2, 0.4, 0.2, 0.4, 'bracket')
-        # 1 bolt up through the shelf into the motor housing, centered
-        # in the Y extent of the shelf (which now spans full motor length).
-        bolt_h_y = shelf_y + shelf_len / 2
-        CZ(rc, f'Bolt_H_{tag}', mx, bolt_h_y,
-           bk_bot-BRKT_T-0.1, 0.18, 0.2, 'bracket')
+    # ==========================================================================
+    # rev32: 3D-printable single-piece PETG motor bracket.
+    # ==========================================================================
+    # The user has no press brake, so a bent sheet-metal bracket isn't
+    # practical. This bracket is designed as a monolithic 4mm-wall PETG
+    # print — all geometry (motor flange + rail arm + gusset + bolt bosses)
+    # is one solid part. In CAD we draw it as separate boxes for
+    # construction ease, but for fabrication the user exports
+    # bracket_<TAG> as a single STL and prints with the rail arm face
+    # DOWN (best bed adhesion, prints the gusset as an overhang-free slope).
+    #
+    # Geometry flanges:
+    #   plate_v (motor face)  — at the GEARBOX SHAFT-END face, carries 2 M3
+    #                           clearance holes at ±8.5mm in Z from shaft
+    #                           center (matches JGA25 mount spec).
+    #   plate_h (rail arm)    — extends BACK from motor face to rail face,
+    #                           carries 2 M5 clearance holes into rail T-slot.
+    #   plate_g (gusset rib)  — thin diagonal web in the L's inside corner
+    #                           for torque stiffness.
+    # Bolt visuals are short cylinders/boxes — they represent hardware
+    # inserted THROUGH the plate into either the motor threads or the T-slot.
+    # ==========================================================================
 
-        # --------------------------------------------------------------
-        # Reinforcement gusset (rev23). A rib that braces the vertical
-        # plate against the horizontal shelf, dramatically stiffening
-        # the bracket against torque from the motor cantilevered below.
-        # Modeled as a rectangular block in the inside corner of the L
-        # — structurally equivalent stiffness to the triangular gussets
-        # a 3D-printed bracket would have, but simpler to model without
-        # non-XY plane sketches. For a real printed part, this block
-        # would become a triangular fillet in the slicer.
-        # --------------------------------------------------------------
-        gusset_w = min(M_CAN * 0.5, 2.0)      # ~20mm Y
-        gusset_h = min(bk_h * 0.35, 2.5)      # ~20-25mm Z
-        gusset_t = 0.3                          # 3mm X (thin rib)
-        # Place the rib centered on the bracket plate width (X=mx)
-        gx = mx - gusset_t / 2
-        # Rib sits in the *inside* of the L, against whichever side of the
-        # vertical plate faces away from the rail.
-        if od < 0:
-            g_y0 = bk_y - gusset_w              # extend -Y from plate
-        else:
-            g_y0 = bk_y + BRKT_T                # extend +Y from plate
-        B(rc, f'BrkG_{tag}', gx, g_y0, bk_bot,
-          gusset_t, gusset_w, gusset_h, 'bracket')
+    BRK = BRKT_T                         # bracket wall thickness = 4mm
+    PV_W, PV_H = 4.0, 4.0                # motor-face plate 40×40 mm
+    M3_Z_OFF = 0.85                       # 17 mm bolt spacing / 2
+    RAIL_BOLT_Z_OFF = S * 0.5             # centered on rail face
+
+    # Gearbox shaft-end face Y position.
+    if od < 0:
+        gbox_face_y = fy - M_CAN - M_GBOX      # e.g. -6.2 for front
+        plate_v_y  = gbox_face_y - BRK         # plate on the WHEEL side of face
+    else:
+        gbox_face_y = fy + M_CAN + M_GBOX
+        plate_v_y  = gbox_face_y
+
+    # ---- plate_v: motor-face flange ----
+    B(rc, f'Brk_{tag}_MtrFlange',
+      mx - PV_W/2, plate_v_y, AXL - PV_H/2,
+      PV_W, BRK, PV_H, 'bracket')
+
+    # 2 M3 bolts going through plate_v into the gearbox threads.
+    # Bolt extends from the outer face of plate_v (visible side) through
+    # the plate and into the motor for bolt_depth. We show a single stubby
+    # cylinder per bolt, with its tail poking out the plate.
+    bolt_depth = M_GBOX * 0.5
+    bolt_total_len = BRK + bolt_depth + 0.2       # extra 2mm for the head
+    if od < 0:
+        bolt_y_start = plate_v_y - 0.2            # head 2mm outside plate
+    else:
+        bolt_y_start = plate_v_y + BRK - bolt_total_len + 0.2
+    for dz in (M3_Z_OFF, -M3_Z_OFF):
+        B(rc, f'Brk_{tag}_M3_{int(dz*10):+d}',
+          mx - 0.15, bolt_y_start,
+          AXL + dz - 0.15, 0.3, bolt_total_len, 0.3, 'bracket')
+
+    # ---- plate_h: rail arm, spans motor face → rail face ----
+    # Arm sits JUST BELOW the motor assembly. Narrow in X so it doesn't
+    # collide with the motor can body.
+    arm_x_w = S * 2/3
+    arm_z0  = AXL - M_DIA/2 - BRK - 0.05          # 0.5mm clearance below motor
+    if od < 0:
+        arm_y0, arm_y1 = gbox_face_y, fy          # from motor face to rail face
+    else:
+        arm_y0, arm_y1 = fy, gbox_face_y
+    arm_len = arm_y1 - arm_y0
+    B(rc, f'Brk_{tag}_RailArm',
+      mx - arm_x_w/2, arm_y0, arm_z0,
+      arm_x_w, arm_len, BRK, 'bracket')
+
+    # 2 M5 bolts through the arm into the rail T-slot, clustered near
+    # the rail end of the arm.
+    rail_bolt_y0 = (fy - 0.6) if od < 0 else (fy + 0.2)
+    for bx_off in (-0.4, 0.4):
+        CZ(rc, f'Brk_{tag}_M5_{int(bx_off*10):+d}',
+           mx + bx_off, rail_bolt_y0 + (0.5 if od>0 else 0.5),
+           arm_z0 - 0.1, 0.22, BRK + 0.3, 'bracket')
+
+    # ---- plate_g: gusset rib in the L's inside corner ----
+    gusset_t = 0.3                                 # 3mm thin rib
+    gusset_h = min(PV_H * 0.6, 2.4)                # ~24mm along Z
+    # Corner of the L is at Y=gbox_face_y (for od<0; plate_v's inner face
+    # is at +BRK), sitting on top of arm at Z=arm_z0+BRK. Gusset extends
+    # DOWN from the plate and BACK toward the rail.
+    if od < 0:
+        g_y0 = gbox_face_y
+        g_len = min(arm_len * 0.5, 2.5)
+    else:
+        g_len = min(arm_len * 0.5, 2.5)
+        g_y0 = gbox_face_y - g_len
+    g_z0 = arm_z0 + BRK                            # sits on top of arm
+    B(rc, f'Brk_{tag}_Gusset',
+      mx - gusset_t/2, g_y0, g_z0,
+      gusset_t, g_len, gusset_h, 'bracket')
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Wiring
