@@ -154,7 +154,7 @@ import os
 #                       does name matching as a backup for nested
 #                       sub-occurrences.
 # =============================================================================
-VERSION = 'rev20'
+VERSION = 'rev21'
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Dimensions (cm) — multiply mm by 0.1
@@ -948,5 +948,12 @@ def _wiring(rc):
 # Ground
 # ═══════════════════════════════════════════════════════════════════════════
 def _ground(rc):
-    p = 3.0
-    B(rc, 'Ground', -p, -M_OFF-p, -0.05, FRAME+2*p, FRAME+2*M_OFF+2*p, 0.05, 'ground')
+    """Small ground plane — just big enough to catch the wheel contact
+    patches. Previously extended way beyond the chassis which made the
+    robot look small in the viewport."""
+    # Extends 1cm beyond the wheels' outer edge on each side.
+    p = 1.0
+    B(rc, 'Ground',
+      -p, -M_OFF - WHL_W/2 - p, -0.05,
+      FRAME + 2*p, FRAME + 2*M_OFF + WHL_W + 2*p, 0.05,
+      'ground')
