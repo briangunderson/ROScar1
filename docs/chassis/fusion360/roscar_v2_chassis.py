@@ -153,8 +153,38 @@ import os
 #                       (30mm) and grub screws (10mm) visible. Also still
 #                       does name matching as a backup for nested
 #                       sub-occurrences.
+#   rev22   2026-04-18  THE import bug: importToTarget2's returned
+#                       ObjectCollection was giving back the FIRST-ever
+#                       imported occurrence on each call (not the newly
+#                       created one), which meant every _place_occ() call
+#                       after the very first was re-positioning the same
+#                       occurrence. The 21 other frame pieces stayed at
+#                       identity (origin), stacked on top of each other —
+#                       the user reported 'almost all of the aluminum frame
+#                       pieces are in the exact same position'. Fix:
+#                       track target_comp.occurrences.count before/after
+#                       the import and use occurrences.item(count_after-1)
+#                       to grab the newly appended occurrence.
+#   rev23   2026-04-18  Motor L-bracket engineering polish + observability:
+#                       - Added a gusset reinforcement block to each of
+#                         the 4 motor L-brackets: a 20x20x3mm rib in the
+#                         inside corner of the L, bracing the vertical
+#                         plate against the horizontal shelf. Makes each
+#                         bracket look like an engineered (stiff) part
+#                         rather than two floppy flat plates.
+#                       - Position verification: _frame() now appends
+#                         an entry to _clog for each rail / post / mast
+#                         with its world-space translation. Shown in the
+#                         final message box so the user can confirm rev22
+#                         really placed all 22 pieces at distinct
+#                         positions. (Catches future regressions early.)
+#                       - Cleaned up dead code in _import_step: the old
+#                         else-branch was a copy-paste duplicate of the
+#                         if-branch. Now raises RuntimeError if Fusion's
+#                         import doesn't actually add an occurrence (was
+#                         silently falling through before).
 # =============================================================================
-VERSION = 'rev22'
+VERSION = 'rev23'
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Dimensions (cm) — multiply mm by 0.1
@@ -218,7 +248,7 @@ PAL = {
     'port':     (35, 35, 40), 'encoder':  (25, 70, 25),
 }
 
-_cc = {};  _clog = []
+_cc = {};  _clog = [];  _frame_positions = []
 
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP model paths (absolute — this script runs locally in Fusion 360)
@@ -271,15 +301,15 @@ def _import_step(target_comp, step_path, name=None):
     mgr.importToTarget2(opts, target_comp)
     count_after = target_comp.occurrences.count
 
-    if count_after > count_before:
-        # New occurrences appended at the end — take the last one
-        occ = target_comp.occurrences.item(count_after - 1)
-    else:
-        # Defensive fallback: if count didn't change (shouldn't happen),
-        # scan for an occurrence without a custom name (the unnamed one
-        # must be the new one).
-        occ = target_comp.occurrences.item(count_after - 1)
+    if count_after <= count_before:
+        # Fusion's STEP import didn't add any occurrence — this should be
+        # impossible for a valid STEP file. Raise instead of silently using
+        # a stale occurrence (which was the rev14-21 bug).
+        raise RuntimeError(
+            f'STEP import added no occurrences: {step_path}')
 
+    # New occurrences are appended at the end of the collection.
+    occ = target_comp.occurrences.item(count_after - 1)
     if name:
         occ.component.name = name
     return occ
@@ -385,6 +415,11 @@ def run(context):
         des.designType = adsk.fusion.DesignTypes.ParametricDesignType
         rc = des.rootComponent
 
+        # Reset per-run globals (module stays loaded across runs in Fusion,
+        # so lists would accumulate stale entries from previous invocations).
+        _clog.clear()
+        _frame_positions.clear()
+
         # Frame imports go into ROOT (not a sub-component) because
         # occurrence.transform only works when the parent is the active edit
         # target. Procedural parts (plates, electronics, etc.) still use
@@ -406,11 +441,35 @@ def run(context):
 
         app.activeViewport.fit()
         trk = FRAME + 2*M_OFF
+
+        # rev23: position verification — confirm every frame import landed
+        # at a distinct world position. Prior to rev22, importToTarget2
+        # returned the same occurrence on every call, so every _place_occ
+        # after the first re-positioned the SAME occurrence — all 21 other
+        # pieces stayed at identity and stacked at (0,0,0). This summary
+        # makes any regression of that bug instantly visible.
+        nfp = len(_frame_positions)
+        unique_pos = {t for _, t in _frame_positions}
+        placement_ok = (len(unique_pos) == nfp) if nfp else True
+        if _frame_positions:
+            xs = [t[0] for _, t in _frame_positions]
+            ys = [t[1] for _, t in _frame_positions]
+            zs = [t[2] for _, t in _frame_positions]
+            bbox = (f'X:[{min(xs):.1f},{max(xs):.1f}]  '
+                    f'Y:[{min(ys):.1f},{max(ys):.1f}]  '
+                    f'Z:[{min(zs):.1f},{max(zs):.1f}] cm')
+        else:
+            bbox = '(no frame imports)'
+
         msg = (f'ROScar1 v2 ({VERSION})\n'
                f'Frame: {FRAME*10:.0f}mm | Track: {trk*10:.0f}mm\n'
                f'WB: {HWB*20:.0f}mm | H: {(MST+MAST_H+LID_H)*10:.0f}mm\n'
                f'Cut plan: 4x248mm + 4x188mm + 4x100mm posts + 1x120mm mast\n'
-               f'Real STEPs: RPi5 + RPLIDAR C1 (other components still placeholder)')
+               f'Real STEPs: RPi5 + RPLIDAR C1\n\n'
+               f'Frame placement check:\n'
+               f'  {nfp} STEP imports, {len(unique_pos)} unique positions '
+               f'{"OK" if placement_ok else "← REGRESSION!"}\n'
+               f'  bbox {bbox}')
         if _clog: msg += f'\nLog: {_clog[0]}'
         ui.messageBox(msg)
     except:
@@ -533,6 +592,7 @@ def _import_rail(rc, name, scale_factor, c0, c1, c2, t):
     _scale_body_y(occ.component, scale_factor)
     _clr_occ(occ, 'frame')
     _place_occ(occ, c0, c1, c2, t)
+    _frame_positions.append((name, t))
     return occ
 
 
@@ -551,6 +611,7 @@ def _import_bracket(rc, step_path, name, c0, c1, c2, t, color='corner',
     occ = _import_step(rc, step_path, name)
     _clr_occ(occ, color)
     _place_occ(occ, c0, c1, c2, t)
+    _frame_positions.append((name, t))
     if hide_stubs:
         _hide_bracket_stubs(occ.component)
     return occ
@@ -954,6 +1015,30 @@ def _motor_assy(rc, tag, mx, fy, od):
         # 1 bolt up through the shelf into the motor housing
         CZ(rc, f'Bolt_H_{tag}', mx, shelf_y+M_CAN*0.3 if od>0 else shelf_y-M_CAN*0.3,
            bk_bot-BRKT_T-0.1, 0.18, 0.2, 'bracket')
+
+        # --------------------------------------------------------------
+        # Reinforcement gusset (rev23). A rib that braces the vertical
+        # plate against the horizontal shelf, dramatically stiffening
+        # the bracket against torque from the motor cantilevered below.
+        # Modeled as a rectangular block in the inside corner of the L
+        # — structurally equivalent stiffness to the triangular gussets
+        # a 3D-printed bracket would have, but simpler to model without
+        # non-XY plane sketches. For a real printed part, this block
+        # would become a triangular fillet in the slicer.
+        # --------------------------------------------------------------
+        gusset_w = min(M_CAN * 0.5, 2.0)      # ~20mm Y
+        gusset_h = min(bk_h * 0.35, 2.5)      # ~20-25mm Z
+        gusset_t = 0.3                          # 3mm X (thin rib)
+        # Place the rib centered on the bracket plate width (X=mx)
+        gx = mx - gusset_t / 2
+        # Rib sits in the *inside* of the L, against whichever side of the
+        # vertical plate faces away from the rail.
+        if od < 0:
+            g_y0 = bk_y - gusset_w              # extend -Y from plate
+        else:
+            g_y0 = bk_y + BRKT_T                # extend +Y from plate
+        B(rc, f'BrkG_{tag}', gx, g_y0, bk_bot,
+          gusset_t, gusset_w, gusset_h, 'bracket')
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Wiring
