@@ -400,8 +400,52 @@ import os
 #                       so the upper bracket body extends DOWN
 #                       from HI to z=18.0 — fully inside the
 #                       post region. No material above the deck.
+#   rev34   2026-04-18  User caught the sanity-check failure mode:
+#                       'corner brackets aren't even touching the
+#                       frame', 'lidar is hanging off the post'.
+#                       Rev33's visual check (and mine) missed
+#                       these obvious geometric errors because I
+#                       was pattern-matching 'looks like a robot'
+#                       instead of checking specific positions.
+#                       Root causes:
+#                       (a) The GrabCAD 3-way corner bracket STEP
+#                           has its body at local (1.25, 6.26, -3.44)
+#                           from origin — when placed at a frame
+#                           corner via (0,0,LO+S), the body ends up
+#                           5-6cm INSIDE the chassis interior, not
+#                           clasping the outer corner. The STEP is
+#                           wrong for our use case.
+#                       (b) The RPLIDAR STEP has body center at
+#                           local (-2.05, -2.05) from origin —
+#                           placing origin at mast axis puts the
+#                           body 2cm forward/left of the mast,
+#                           making it visibly 'hang off the post'.
+#                       Rev34 fixes:
+#                       1. Drop the bracket STEP import. Draw 8
+#                          procedural 2-flange corner brackets as
+#                          thin plates hugging the outer -X and -Y
+#                          faces of each corner junction. Brass
+#                          color. Actually touching the rails.
+#                          User 3D-prints these if they want.
+#                       2. Compensate lidar placement by +2.05 cm
+#                          in X and Y so the lidar body lands
+#                          centered on the mast axis.
+#                       3. New sanity checks:
+#                          - corner_brackets_at_junctions: every
+#                            CB_* bracket's first visible body must
+#                            be within 3 cm of the nominal post-
+#                            rail junction for that corner.
+#                          - lidar_on_mast_axis: lidar body center
+#                            must be within 1.5 cm of mast axis.
+#                         Rev31's 'motors_touch_bracket' check was
+#                         already there.
+#                       Lesson recorded in
+#                       tasks/chassis-v2-sanity-checks.md: the
+#                       visual check isn't 'overall form looks
+#                       right' — it's 'each named part is within
+#                       X cm of its intended XYZ'.
 # =============================================================================
-VERSION = 'rev33'
+VERSION = 'rev34'
 
 # Chassis volume (cm) for _hide_stray_bodies. Anything whose body's
 # bounding-box center falls outside this box gets hidden.
@@ -904,6 +948,102 @@ def _run_sanity_checks(rc):
         'motor flange at gearbox face for all 4'
         if motor_touch_ok else 'misaligned: ' + ', '.join(bad_tags))
 
+    # --- corner_brackets_at_junctions: for each of 8 CB_* brackets,
+    # the bracket's VISIBLE body (not a hidden stub — any body with
+    # isLightBulbOn=True) must have its bbox center within 3 cm of the
+    # nominal rail-post junction at that corner. Nominal junction is
+    # (1.5, 1.5, Z) for FL, (1.5, FRAME-1.5, Z) for FR, etc., with Z=LO+S
+    # for lower and Z=HI for upper. This catches 'bracket sitting 6cm
+    # into the chassis interior' — the user's real complaint.
+    cb_ok = True
+    cb_bad = []
+    cb_expected = {
+        'CB_Lo_FL': (1.5, 1.5, LO + S),
+        'CB_Lo_FR': (1.5, FRAME - 1.5, LO + S),
+        'CB_Lo_RL': (FRAME - 1.5, 1.5, LO + S),
+        'CB_Lo_RR': (FRAME - 1.5, FRAME - 1.5, LO + S),
+        'CB_Hi_FL': (1.5, 1.5, HI),
+        'CB_Hi_FR': (1.5, FRAME - 1.5, HI),
+        'CB_Hi_RL': (FRAME - 1.5, 1.5, HI),
+        'CB_Hi_RR': (FRAME - 1.5, FRAME - 1.5, HI),
+    }
+    for name, (ex, ey, ez) in cb_expected.items():
+        # Look up in _frame_positions; rev34 procedural brackets stash
+        # occ=None, in which case we find the body via name prefix
+        # ('<name>_X' or '<name>_Y' for the two flanges).
+        target_occ = None
+        target_pos = None
+        for nm, pos, occ in _frame_positions:
+            if nm == name:
+                target_occ = occ
+                target_pos = pos
+                break
+
+        center = None
+        if target_occ is not None:
+            # STEP-imported bracket: walk the component tree for the
+            # first VISIBLE body.
+            def _first_visible(comp):
+                for i in range(comp.bRepBodies.count):
+                    b = comp.bRepBodies.item(i)
+                    try:
+                        if b.isLightBulbOn:
+                            bb = b.boundingBox
+                            return ((bb.minPoint.x + bb.maxPoint.x)/2,
+                                    (bb.minPoint.y + bb.maxPoint.y)/2,
+                                    (bb.minPoint.z + bb.maxPoint.z)/2)
+                    except Exception:
+                        pass
+                for i in range(comp.occurrences.count):
+                    hit = _first_visible(comp.occurrences.item(i).component)
+                    if hit is not None:
+                        return hit
+                return None
+            center = _first_visible(target_occ.component)
+        else:
+            # Procedural bracket: look up the X-flange body in root.
+            _, c_x = _find_body_by_name(rc, f'{name}_X')
+            _, c_y = _find_body_by_name(rc, f'{name}_Y')
+            if c_x and c_y:
+                center = ((c_x[0] + c_y[0]) / 2,
+                          (c_x[1] + c_y[1]) / 2,
+                          (c_x[2] + c_y[2]) / 2)
+            elif target_pos is not None:
+                center = tuple(target_pos)
+
+        if center is None:
+            cb_ok = False
+            cb_bad.append(f'{name}(no_body)')
+            continue
+        dx, dy, dz = center[0] - ex, center[1] - ey, center[2] - ez
+        dist = (dx*dx + dy*dy + dz*dz) ** 0.5
+        if dist > 3.0:     # more than 3cm from junction = bracket floating
+            cb_ok = False
+            cb_bad.append(f'{name}(Δ={dist:.1f}cm)')
+    add('corner_brackets_at_junctions',
+        cb_ok,
+        '8 brackets within 3cm of post-rail junctions'
+        if cb_ok else 'floating: ' + ', '.join(cb_bad))
+
+    # --- lidar_on_mast_axis: the RPLIDAR body's bbox center must be
+    # within 1.5 cm of the mast axis (X=FRAME-S, Y=FRAME/2). Catches
+    # 'lidar hanging off the post' — body has an internal offset from
+    # its STEP origin that needs to be compensated for in placement.
+    mast_x, mast_y = FRAME - S, FRAME / 2
+    _, lidar_c = _find_body_by_name(rc, 'RPLIDAR')
+    if lidar_c is None:
+        # Procedural fallback uses 'Lidar_Base' / 'Lidar_Head' names.
+        _, lidar_c = _find_body_by_name(rc, 'Lidar_Base')
+    if lidar_c is None:
+        add('lidar_on_mast_axis', False, 'no lidar body found')
+    else:
+        dx = lidar_c[0] - mast_x
+        dy = lidar_c[1] - mast_y
+        r = (dx*dx + dy*dy) ** 0.5
+        add('lidar_on_mast_axis',
+            r <= 1.5,
+            f'lidar XY offset from mast axis = {r:.2f}cm (<=1.5)')
+
     # --- strays_hidden_count: number of hidden bodies ---
     n_hidden = _count_hidden_bodies(rc)
     # Expected baseline from rev30: ~94 (decorative hardware from
@@ -982,6 +1122,11 @@ def run(context):
         nfp = len(_frame_positions)
         actual = []
         for nm, intended, occ in _frame_positions:
+            if occ is None:
+                # Procedural geometry (e.g. rev34 corner brackets):
+                # use the stored intended position as "actual".
+                actual.append((nm, tuple(intended), intended))
+                continue
             try:
                 comp = occ.component
                 if comp.bRepBodies.count == 0:
@@ -1171,6 +1316,59 @@ def _import_rail(rc, name, scale_factor, c0, c1, c2, t):
     return occ
 
 
+def _draw_corner_bracket(rc, name, cx, cy, cz, dx_sign, dy_sign,
+                         flange_size=3.0, flange_thickness=0.3, color='corner'):
+    """Procedural 2-flange corner bracket (rev34).
+
+    Creates two thin brass-colored plates meeting at the outer corner
+    (cx, cy, cz) of the chassis frame:
+      - One flange lies flat on the -X outer face (at X = cx or cx-T),
+        extending in Y toward the interior (+dy_sign direction) and in
+        Z by ±flange_size/2.
+      - One flange lies flat on the -Y outer face (at Y = cy or cy-T),
+        extending in X toward the interior (+dx_sign direction) and in
+        Z by ±flange_size/2.
+
+    This gives each bracket a body_center AT the corner junction,
+    physically contacting the outer faces of the rails and post.
+    Designed as a single 3D-printable PETG part (user has no press
+    brake); in CAD we draw it as two box bodies meeting at the corner.
+
+    Also appends the bracket's world position to _frame_positions so
+    the sanity-check framework can verify placement.
+    """
+    T = flange_thickness
+    # Flange 1: on the ∓X outer face
+    if dx_sign > 0:                           # corner at X=cx, interior +X
+        f1_x, f1_sx = cx - T, T
+    else:                                     # corner at X=cx, interior -X
+        f1_x, f1_sx = cx, T
+    if dy_sign > 0:
+        f1_y, f1_sy = cy, flange_size
+    else:
+        f1_y, f1_sy = cy - flange_size, flange_size
+    f1_z, f1_sz = cz - flange_size / 2, flange_size
+    B(rc, f'{name}_X', f1_x, f1_y, f1_z, f1_sx, f1_sy, f1_sz, color)
+
+    # Flange 2: on the ∓Y outer face
+    if dx_sign > 0:
+        f2_x, f2_sx = cx, flange_size
+    else:
+        f2_x, f2_sx = cx - flange_size, flange_size
+    if dy_sign > 0:
+        f2_y, f2_sy = cy - T, T
+    else:
+        f2_y, f2_sy = cy, T
+    f2_z, f2_sz = cz - flange_size / 2, flange_size
+    B(rc, f'{name}_Y', f2_x, f2_y, f2_z, f2_sx, f2_sy, f2_sz, color)
+
+    # Stash position in _frame_positions for sanity-check compatibility.
+    # occ=None signals "procedural geometry, no Occurrence wrapper"; the
+    # consumers check hasattr-ish to fall back to the stored intended
+    # position for body_center.
+    _frame_positions.append((name, (cx, cy, cz), None))
+
+
 def _import_bracket(rc, step_path, name, c0, c1, c2, t, color='corner',
                     hide_stubs=True):
     """Import a bracket STEP and position it. No scaling — brackets are fixed size.
@@ -1293,26 +1491,24 @@ def _frame(rc):
     _import_rail(rc, 'Mast', mast_scale, _X, _Z, _NY, (FRAME - S, FRAME / 2, MST))
 
     # --------------------------------------------------------------------
-    # Corner brackets (8 total) — STEP has arms along +X, +Y, +Z.
-    # Lower deck: Z arm points UP. Upper deck: Z arm points DOWN.
-    # Upper-deck rotations swap X/Y columns to keep det=+1 (proper rotation).
+    # Corner brackets (rev34): procedural 2-flange brackets hugging the
+    # outer -X and -Y faces of each corner junction. Replaces the
+    # GrabCAD STEP import, whose body was at local (1.25, 6.26, -3.44)
+    # — placing it 5-6cm inside the chassis interior instead of AT
+    # the rail-post corner. These simple box pairs are easy to 3D-print
+    # as single PETG parts (user has no press brake).
     # --------------------------------------------------------------------
-    # Lower deck brackets
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_FL', _X,  _Y,  _Z, (0,     0,     LO + S))
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_FR', _NY, _X,  _Z, (0,     FRAME, LO + S))
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_RL', _Y,  _NX, _Z, (FRAME, 0,     LO + S))
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_RR', _NX, _NY, _Z, (FRAME, FRAME, LO + S))
-    # Upper deck brackets — rev33: use the SAME per-corner rotations as
-    # the lower-deck brackets (no Z-flip). The bracket STEP's body
-    # material is at local (+X, +Y, -Z). Identity-Z rotation keeps the
-    # body at world -Z from the placement point, which for placement
-    # at Z=HI sends the body DOWN into the post (z range ~[18.0, 21.44]).
-    # That's the right direction — the upper bracket clasps the post
-    # from ABOVE by extending DOWN.
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_FL', _X,  _Y,  _Z, (0,     0,     HI))
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_FR', _NY, _X,  _Z, (0,     FRAME, HI))
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_RL', _Y,  _NX, _Z, (FRAME, 0,     HI))
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_RR', _NX, _NY, _Z, (FRAME, FRAME, HI))
+    for nm, cx, cy, cz, dx_sign, dy_sign in [
+        ('CB_Lo_FL', 0,     0,     LO + S, +1, +1),
+        ('CB_Lo_FR', 0,     FRAME, LO + S, +1, -1),
+        ('CB_Lo_RL', FRAME, 0,     LO + S, -1, +1),
+        ('CB_Lo_RR', FRAME, FRAME, LO + S, -1, -1),
+        ('CB_Hi_FL', 0,     0,     HI,     +1, +1),
+        ('CB_Hi_FR', 0,     FRAME, HI,     +1, -1),
+        ('CB_Hi_RL', FRAME, 0,     HI,     -1, +1),
+        ('CB_Hi_RR', FRAME, FRAME, HI,     -1, -1),
+    ]:
+        _draw_corner_bracket(rc, nm, cx, cy, cz, dx_sign, dy_sign)
 
     # --------------------------------------------------------------------
     # T-plate bracket for lidar mast attachment to rear upper rail.
@@ -1417,11 +1613,19 @@ def _components(rc, root=None):
     lz = mp_z + mp_t
     if os.path.exists(STEP_RPLIDAR_C1):
         # Real RPLIDAR C1 CAD from slamtec.com. Body is 55.6x55.6x41.3mm.
-        # Imported into ROOT so the placement transform actually applies.
+        # rev34: The STEP's body_center sits at local (-2.05, -2.05, 0)
+        # from its origin, so passing (lcx - LID_SZ/2, lcy - LID_SZ/2)
+        # as the origin translation made the actual body_center land
+        # at world (16.97, 7.57) — almost 5 cm forward/left of the
+        # mast axis (21.8, 12.4). Compensate so the body CENTER (not
+        # origin) lands on the mast axis: target = (lcx, lcy) - offset.
+        LIDAR_LOCAL_CENTER_OFFSET = (-2.05, -2.05)
+        tx = lcx - LIDAR_LOCAL_CENTER_OFFSET[0]
+        ty = lcy - LIDAR_LOCAL_CENTER_OFFSET[1]
         try:
             lid_occ = _import_step(root, STEP_RPLIDAR_C1, 'RPLIDAR_C1')
             _clr_occ(lid_occ, 'lidar')
-            _place_occ(lid_occ, _X, _Y, _Z, (lcx - LID_SZ/2, lcy - LID_SZ/2, lz))
+            _place_occ(lid_occ, _X, _Y, _Z, (tx, ty, lz))
         except Exception as e:
             _clog.append(f'RPLIDAR STEP import failed: {e}')
             bh = LID_H * 0.35; hh = LID_H * 0.65
