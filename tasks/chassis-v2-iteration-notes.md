@@ -2,9 +2,25 @@
 
 ## TL;DR
 
-Script is at **rev21**. Chassis renders cleanly in Fusion 360 with all
+Script is at **rev23**. Chassis renders cleanly in Fusion 360 with all
 22 structural STEP occurrences + 2 electronics STEPs placed correctly.
 Frame dimensions verified CAD-matches-cut-sheet.
+
+**rev22 fixed a critical bug** — prior to rev22, `importToTarget2`'s
+returned ObjectCollection was giving back the FIRST-ever imported
+occurrence on every call (not the newest), so every `_place_occ()`
+after the first was repositioning the same occurrence. All 21 other
+rails/posts/brackets stayed at identity and stacked on top of each other
+at `(0,0,0)`. The fix: use `target_comp.occurrences.count` before and
+after the import, and grab the newly appended occurrence by index.
+
+**rev23 added observability + bracket polish**:
+- Motor L-brackets now have a reinforcement gusset in the inside
+  corner of the L (4 brackets × 1 rib).
+- The completion dialog now reports `{n} STEP imports, {k} unique
+  positions OK` plus the X/Y/Z bounding box of frame placements. If
+  the rev22 bug ever regresses, you'll see `k=1` and a zero-width
+  bbox, caught instantly.
 
 The major bugs that caused your "floating objects / frame missing"
 complaint are fixed:
@@ -29,6 +45,8 @@ complaint are fixed:
 | 19 | Size-based stub hiding (threshold 5cm) | Name matching wasn't reliable — sized-based catches stubs by bounding box |
 | 20 | Raise threshold 5cm → 8cm; bolder brass | 5cm was too aggressive (hid T-plates at 85mm); brass was too tan |
 | 21 | Shrink ground plane to wheel contact patches | Was extending 60cm past chassis — made the robot look small in viewport |
+| 22 | **Fix `importToTarget2` returning wrong occurrence** | User reported "almost all of the aluminum frame pieces are in the exact same position." `_place_occ` was targeting the FIRST-ever imported occurrence on every call. Now use count before/after to get the newly appended occurrence. |
+| 23 | Motor L-bracket gussets + placement verification | Each bracket now has a reinforcement rib in the inside L corner. Completion dialog shows `{n} STEP imports, {k} unique positions` — catches rev22 regressions instantly. Also cleaned up dead copy-paste code in `_import_step`. |
 
 All committed and pushed to master.
 

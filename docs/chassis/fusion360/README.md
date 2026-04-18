@@ -107,6 +107,17 @@ for the full change history. Notable milestones:
   sub-component transform bug
 - **rev16–20**: palette + visibility polish (silver rails, brass brackets)
 - **rev21**: ground plane shrunk to chassis footprint
+- **rev22**: fixed the critical `importToTarget2` bug where the function
+  returned the first-ever imported occurrence on each call instead of
+  the newly created one — caused all 21 rails/posts/brackets after the
+  first to stay at identity (stacked at origin). Now uses a
+  `count_before`/`count_after` sandwich to grab the freshly appended
+  occurrence.
+- **rev23**: engineering polish + observability — motor L-brackets now
+  have a reinforcement gusset in the inside corner; a placement
+  verification summary is printed in the completion dialog
+  (`22 STEP imports, 22 unique positions OK`) so any regression of the
+  rev22 bug is caught instantly; dead-code cleanup in `_import_step`.
 
 ## Related Documentation
 
