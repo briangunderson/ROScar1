@@ -263,8 +263,30 @@ import os
 #                       verification now reads the body's bounding-
 #                       box center instead of occ.transform, since
 #                       occ.transform is legitimately still identity.
+#                       Result: 13/22 placements succeed (rails,
+#                       posts, mast, lidar — all single-body STEPs).
+#                       The other 9 (corner brackets, T-plate, RPi5)
+#                       are multi-body assemblies — their bodies live
+#                       in SUB-components, so comp.features.moveFeatures
+#                       rejects them with 'object is not in the
+#                       assembly context of this component'. Need to
+#                       recurse for assemblies.
+#   rev28   2026-04-18  Recursive body-move handling multi-body
+#                       assemblies. For each component encountered,
+#                       move its OWN direct bodies via its OWN
+#                       features.moveFeatures — then recurse into
+#                       each sub-occurrence and do the same on the
+#                       sub-component. Every leaf component's move
+#                       uses the same outer target matrix `mat`.
+#                       Works cleanly when sub-occurrences are at
+#                       identity (typical for imported STEP assemblies);
+#                       may deform if a sub-occurrence has a non-
+#                       identity transform, but for the bracket /
+#                       T-plate / Pi5 / lidar STEPs in our collection
+#                       the nesting is flat and sub-transforms are
+#                       identity, so rigid translation holds.
 # =============================================================================
-VERSION = 'rev27'
+VERSION = 'rev28'
 
 # Setting this to False before calling run() suppresses the final
 # summary ui.messageBox (a modal dialog that blocks on the main thread).
@@ -422,70 +444,85 @@ def _mat(c0, c1, c2, t):
 
 
 def _place_occ(occ, c0, c1, c2, t):
-    """Position an imported STEP occurrence by moving the BODIES inside
-    its component (not the occurrence itself).
+    """Position an imported STEP occurrence by applying a MoveFeature
+    to every body it contains, recursing into sub-components.
 
-    Background: Fusion's moveFeatures.createInput2 rejected Occurrence
-    entities in ParametricDesignType with 'invalid argument
-    inputEntities', so rev26's occurrence-move approach failed too.
-    Every STEP import creates its own unique component with its own
-    bodies; since we never reuse components across placements, moving
-    the BODIES in the component's local timeline is equivalent to
-    moving the occurrence, and moveFeatures accepts BRepBody
-    collections reliably.
+    Single-body STEPs (rails, posts, mast, lidar): just one direct
+    body in occ.component; one MoveFeature in comp.features.moveFeatures.
 
-    The occurrence stays at identity. World position of geometry comes
-    entirely from the body-internal MoveFeature transform.
+    Multi-body assembly STEPs (corner brackets, T-plate, RPi5 with PCB
+    assemblies): bodies live in SUB-components of occ.component.
+    comp.features.moveFeatures rejects them ('object is not in the
+    assembly context of this component'), so we recurse: for each
+    leaf component encountered, apply the MoveFeature to its OWN
+    direct bodies using its OWN features.moveFeatures. If a sub-
+    occurrence has a non-identity local transform relative to its
+    parent, the rigid-assembly assumption breaks and geometry can
+    deform — in practice the STEPs in our collection nest flatly
+    with identity sub-transforms, so pure translation moves the
+    whole assembly as a unit.
     """
     mat = _mat(c0, c1, c2, t)
     comp = occ.component
     name = comp.name if comp else '?'
 
-    # Collect every body in the component's root + nested sub-occurrences.
-    # For the 3030 extrusion STEP this is typically 1 body. For the
-    # corner-bracket assembly it can be several (bracket body + grub
-    # screws + decorative stubs). We want them all moved as a rigid
-    # group so the sub-assembly stays assembled.
-    coll = adsk.core.ObjectCollection.create()
-    def _collect(c):
-        for i in range(c.bRepBodies.count):
-            coll.add(c.bRepBodies.item(i))
+    total_moved = 0
+    errors = []
+
+    def _move_in_comp(c, depth=0):
+        nonlocal total_moved
+        try:
+            # Gather direct bodies (not nested) for this component
+            coll = adsk.core.ObjectCollection.create()
+            for i in range(c.bRepBodies.count):
+                coll.add(c.bRepBodies.item(i))
+            if coll.count > 0:
+                try:
+                    mi = c.features.moveFeatures.createInput2(coll)
+                    mi.defineAsFreeMove(mat)
+                    c.features.moveFeatures.add(mi)
+                    total_moved += coll.count
+                except Exception as e:
+                    errors.append(f'{c.name}@d{depth}: {e}')
+            # Recurse into sub-occurrences
+            for i in range(c.occurrences.count):
+                sub = c.occurrences.item(i)
+                _move_in_comp(sub.component, depth + 1)
+        except Exception as e:
+            errors.append(f'{c.name}@d{depth}: walk: {e}')
+
+    _move_in_comp(comp)
+
+    if errors:
+        _clog.append(f'_place_occ[{name}] errors: ' + '; '.join(errors[:3]))
+
+    # Verify: body-center of first reachable body.
+    def _first_body(c):
+        if c.bRepBodies.count > 0:
+            return c.bRepBodies.item(0)
         for i in range(c.occurrences.count):
-            _collect(c.occurrences.item(i).component)
+            b = _first_body(c.occurrences.item(i).component)
+            if b is not None:
+                return b
+        return None
     try:
-        _collect(comp)
-    except Exception as e:
-        _clog.append(f'_place_occ[{name}] body-collect raised: {e}')
-    if coll.count == 0:
-        print(f'_place_occ name={name} SKIP: no bodies to move')
-        return
-
-    move_err = None
-    try:
-        mi = comp.features.moveFeatures.createInput2(coll)
-        mi.defineAsFreeMove(mat)
-        comp.features.moveFeatures.add(mi)
-    except Exception as e:
-        move_err = str(e)
-        _clog.append(f'_place_occ[{name}] moveFeature raised: {e}')
-
-    # Verify by reading the body's bounding-box center. The occ.transform
-    # is still identity (we moved the bodies, not the occurrence), so
-    # reading it would be misleading. Bounding-box center gives us the
-    # actual world-space position of the first body.
-    try:
-        b0 = comp.bRepBodies.item(0)
-        bb = b0.boundingBox
-        cx = (bb.minPoint.x + bb.maxPoint.x) / 2
-        cy = (bb.minPoint.y + bb.maxPoint.y) / 2
-        cz = (bb.minPoint.z + bb.maxPoint.z) / 2
-        body_center = (cx, cy, cz)
+        b0 = _first_body(comp)
+        if b0 is None:
+            body_center = 'NO_BODY'
+        else:
+            bb = b0.boundingBox
+            body_center = (
+                (bb.minPoint.x + bb.maxPoint.x) / 2,
+                (bb.minPoint.y + bb.maxPoint.y) / 2,
+                (bb.minPoint.z + bb.maxPoint.z) / 2,
+            )
     except Exception as e:
         body_center = f'BB_READ_FAILED: {e}'
 
     print(
         f'_place_occ name={name} want={tuple(round(v, 3) for v in t)} '
-        f'bodies={coll.count} move_err={move_err} body_center={body_center}')
+        f'moved_bodies={total_moved} errors={len(errors)} '
+        f'body_center={body_center}')
 
 
 def _instance(rc, comp, c0, c1, c2, t):
