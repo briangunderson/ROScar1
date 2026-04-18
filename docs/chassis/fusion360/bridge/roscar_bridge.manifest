@@ -1,0 +1,13 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "addin",
+    "id": "com.roscar.bridge",
+    "author": "Brian Gunderson",
+    "description": {
+        "": "Filesystem-dropbox bridge for remote script control. Enables Claude (or any external process) to drive Fusion 360 by writing JSON commands to ~/roscar_fusion_bridge/inbox and reading results from the outbox."
+    },
+    "version": "0.1.0",
+    "runOnStartup": true,
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}
