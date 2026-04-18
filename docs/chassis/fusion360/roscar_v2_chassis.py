@@ -989,10 +989,15 @@ def _frame(rc):
     _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_RR', _NY, _NX, _NZ, (FRAME, FRAME, HI))
 
     # --------------------------------------------------------------------
-    # T-plate bracket for lidar mast attachment to rear upper rail
-    # --------------------------------------------------------------------
+    # T-plate bracket for lidar mast attachment to rear upper rail.
+    # The T-plate STEP has its origin at a corner (not the center), so
+    # to align the PLATE's center with the mast we shift by half the
+    # plate's extent: rev28 diagnostics showed body_center - translation
+    # = (4.5, 4.5, 0.2), meaning the STEP is 9cm x 9cm x 0.4cm with
+    # origin at one corner. Compensate with -4.5cm in X and Y.
     _import_bracket(rc, STEP_TPLATE_M6, 'Mast_TPlate',
-                    _X, _Y, _Z, (FRAME - S, FRAME / 2, MST - 0.1))
+                    _X, _Y, _Z,
+                    (FRAME - S - 4.5, FRAME / 2 - 4.5, MST - 0.1 - 0.2))
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Plates & standoffs
