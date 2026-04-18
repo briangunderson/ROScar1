@@ -154,7 +154,7 @@ import os
 #                       does name matching as a backup for nested
 #                       sub-occurrences.
 # =============================================================================
-VERSION = 'rev21'
+VERSION = 'rev22'
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Dimensions (cm) — multiply mm by 0.1
@@ -251,13 +251,35 @@ _NX = (-1, 0, 0); _NY = (0, -1, 0); _NZ = (0, 0, -1)
 
 
 def _import_step(target_comp, step_path, name=None):
-    """Import a STEP file into target_comp. Returns the Occurrence."""
+    """Import a STEP file into target_comp. Returns the new Occurrence.
+
+    CRITICAL: uses the target_comp.occurrences count before/after the
+    import to identify the new occurrence. `importToTarget2`'s returned
+    ObjectCollection has been observed to return the FIRST-ever imported
+    occurrence (not the newest) when called multiple times — which meant
+    every _place_occ() call after the first one was setting the transform
+    on the SAME occurrence, leaving all subsequent imports at identity
+    (origin). All the aluminum frame pieces ended up stacked at (0,0,0)
+    while only one got positioned correctly. Tracking count fixes this.
+    """
     app = adsk.core.Application.get()
     mgr = app.importManager
     opts = mgr.createSTEPImportOptions(step_path)
     opts.isViewFit = False
-    results = mgr.importToTarget2(opts, target_comp)
-    occ = adsk.fusion.Occurrence.cast(results.item(0))
+
+    count_before = target_comp.occurrences.count
+    mgr.importToTarget2(opts, target_comp)
+    count_after = target_comp.occurrences.count
+
+    if count_after > count_before:
+        # New occurrences appended at the end — take the last one
+        occ = target_comp.occurrences.item(count_after - 1)
+    else:
+        # Defensive fallback: if count didn't change (shouldn't happen),
+        # scan for an occurrence without a custom name (the unnamed one
+        # must be the new one).
+        occ = target_comp.occurrences.item(count_after - 1)
+
     if name:
         occ.component.name = name
     return occ
