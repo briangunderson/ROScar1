@@ -137,9 +137,15 @@ import os
 #                       tree and toggles isLightBulbOn=False on any sub-
 #                       occurrence whose name contains 'profile', 'extrusion',
 #                       or 't-slot'. Grub screws and the bracket body stay
-#                       visible.
+#                       visible. (Partial success — logic still needs work
+#                       to reliably find stub bodies in nested assemblies.)
+#   rev18   2026-04-17  Corner brackets to brass/gold (205,160,75) — they
+#                       were blending with aluminum rails in silver and
+#                       making it hard to tell bracket from rail. Brass
+#                       is maximally visually distinct and reads as a
+#                       commodity hardware color.
 # =============================================================================
-VERSION = 'rev17'
+VERSION = 'rev18'
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Dimensions (cm) — multiply mm by 0.1
@@ -193,7 +199,7 @@ PAL = {
     'lidar':    (30, 30, 38),      # lidar dark
     'camera':   (50, 50, 58),      # camera body
     'bracket':  (230, 120, 30),    # orange (motor L-brackets) — pops against frame
-    'corner':   (130, 135, 148),   # slightly darker silver so corner brackets are distinguishable from aluminum rails
+    'corner':   (205, 160, 75),    # brass/gold — maximally distinct from the aluminum rails so brackets and rails don't visually blend together
     'ground':   (85, 90, 98),      # warm gray floor
     'hub':      (135, 140, 150),   # wheel hub
     'standoff': (185, 190, 200),   # standoffs silver-ish
