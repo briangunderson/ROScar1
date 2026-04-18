@@ -225,8 +225,26 @@ import os
 #                       The bridge captures stdout, so we can see
 #                       every call's outcome and isolate which step
 #                       is silently failing.
+#   rev26   2026-04-18  PARAMETRIC FIX. rev25's diagnostics caught it:
+#                       `occ.transform = mat` sets the property and the
+#                       immediate read-back returns the intended value
+#                       — but in ParametricDesignType, the direct
+#                       property set is NOT a timeline feature, so the
+#                       next recompute (triggered by any subsequent
+#                       scaleFeatures.add / extrudeFeatures.add / STEP
+#                       import) silently reverts the imported
+#                       occurrence to identity. By the time the final
+#                       readback happens, everything is back to
+#                       (0,0,0). Fix: always place occurrences via a
+#                       MoveFeature — it lives in the timeline and
+#                       survives recompute. The direct-setter path is
+#                       removed entirely (was only ever a no-op in
+#                       our use case). rootComponent.activate() is
+#                       also dropped (Component has no such method;
+#                       the 'activate_failed' lines were harmless but
+#                       noisy).
 # =============================================================================
-VERSION = 'rev25'
+VERSION = 'rev26'
 
 # Setting this to False before calling run() suppresses the final
 # summary ui.messageBox (a modal dialog that blocks on the main thread).
@@ -384,124 +402,61 @@ def _mat(c0, c1, c2, t):
 
 
 def _place_occ(occ, c0, c1, c2, t):
-    """Position an existing occurrence using column vectors + translation.
+    """Position an existing occurrence using a MoveFeature.
 
-    CRITICAL (rev24): Fusion's `occurrence.transform` setter silently fails
-    if the occurrence's parent component isn't the currently active edit
-    target. `importManager.importToTarget2()` has been observed to change
-    the active target to the newly imported sub-component — so by the time
-    we call this for a freshly imported occurrence, root (the occurrence's
-    parent) is no longer active. The assignment gets silently rejected and
-    the occurrence stays at identity (origin). That's what caused the user
-    to report 'all aluminum extrusion pieces occupying the same space'
-    even AFTER the rev22 occurrence-identification fix — the right
-    occurrence was being targeted, but the setter was a no-op.
+    In ParametricDesignType, the direct `occ.transform = mat` setter
+    takes effect immediately but is NOT a timeline feature — so the
+    next parametric operation that triggers a recompute (another
+    scaleFeatures.add, extrudeFeatures.add, STEP import, etc.) wipes
+    out all the transforms we carefully placed. Rev25's diagnostics
+    caught this: every post-set read returned the intended value, but
+    the end-of-run readback showed every imported occurrence back at
+    identity.
 
-    Fix: explicitly activate the occurrence's parent component before
-    assigning transform. For occurrences directly under root (which is
-    all frame imports), that means re-activating the root component.
-
-    We also read back the actual post-assignment transform to detect
-    silent failures. If the identity transform is still in effect after
-    our call, we fall back to creating a MoveFeature, which isn't subject
-    to the active-target restriction.
+    Fix (rev26): always place occurrences via a MoveFeature. That
+    lives in the timeline and survives recompute. We compute the
+    delta from the occurrence's current transform (typically identity
+    right after import) to the target matrix.
     """
     mat = _mat(c0, c1, c2, t)
     name = occ.component.name if occ.component else '?'
 
-    # --- DIAGNOSTIC (rev25): capture pre-state ---
-    try:
-        pre_tr = occ.transform.translation
-        pre = (pre_tr.x, pre_tr.y, pre_tr.z)
-    except Exception as e:
-        pre = f'PRE_READ_FAILED: {e}'
-    try:
-        token = occ.entityToken[:16] + '...'
-    except Exception:
-        token = '?'
+    # Build the delta: delta = mat * inverse(current)
+    cur = occ.transform
+    cur_inv = cur.copy()
+    if not cur_inv.invert():
+        print(f'_place_occ name={name} SKIP: current transform not invertible')
+        _clog.append(f'_place_occ[{name}]: non-invertible current transform')
+        return
+    delta = mat.copy()
+    delta.transformBy(cur_inv)
 
+    # Apply via MoveFeature on the root component (the occurrence's
+    # parent is root in our current import strategy).
+    move_err = None
     try:
         app = adsk.core.Application.get()
         des = adsk.fusion.Design.cast(app.activeProduct)
-        ac = occ.assemblyContext  # None if occ is directly under root
-        if ac is None:
-            des.rootComponent.activate()
-            active_kind = 'root'
-        else:
-            try:
-                ac.activate(); active_kind = 'parent'
-            except Exception:
-                des.rootComponent.activate(); active_kind = 'root(fallback)'
+        rc = des.rootComponent
+        coll = adsk.core.ObjectCollection.create()
+        coll.add(occ)
+        mi = rc.features.moveFeatures.createInput2(coll)
+        mi.defineAsFreeMove(delta)
+        rc.features.moveFeatures.add(mi)
     except Exception as e:
-        active_kind = f'activate_failed:{e}'
+        move_err = str(e)
+        _clog.append(f'_place_occ[{name}] moveFeature raised: {e}')
 
-    setter_raised = None
-    try:
-        occ.transform = mat
-    except Exception as e:
-        setter_raised = str(e)
-        _clog.append(f'_place_occ[{name}] transform set raised: {e}')
-
-    # --- DIAGNOSTIC: post-setter read ---
+    # Diagnostic: verify the post-move transform matches intent.
     try:
         post_tr = occ.transform.translation
         post = (post_tr.x, post_tr.y, post_tr.z)
     except Exception as e:
         post = f'POST_READ_FAILED: {e}'
 
-    setter_ok = (
-        isinstance(post, tuple)
-        and abs(post[0] - t[0]) <= 1e-3
-        and abs(post[1] - t[1]) <= 1e-3
-        and abs(post[2] - t[2]) <= 1e-3
-    )
-    move_raised = None
-    move_post = None
-    if not setter_ok and setter_raised is None:
-        # Silent failure — fall back to MoveFeature
-        move_raised = _place_via_move(occ, mat)
-        try:
-            mp = occ.transform.translation
-            move_post = (mp.x, mp.y, mp.z)
-        except Exception as e:
-            move_post = f'MOVE_POST_READ_FAILED: {e}'
-
-    # Emit a single line of diagnostics per call. Goes to stdout which
-    # the bridge captures.
     print(
-        f'_place_occ name={name} token={token} want={tuple(round(v,3) for v in t)} '
-        f'pre={pre} active={active_kind} setter_raised={setter_raised} '
-        f'post={post} setter_ok={setter_ok} '
-        f'move_raised={move_raised} move_post={move_post}')
-
-
-def _place_via_move(occ, mat):
-    """Move an occurrence using a MoveFeature instead of the transform
-    setter. Works even when the parent component isn't the active edit
-    target. Uses the occurrence's current transform as the 'from' state
-    and computes the delta matrix to reach `mat`.
-
-    Returns None on success, an error string on failure — for diagnostics.
-    """
-    try:
-        app = adsk.core.Application.get()
-        des = adsk.fusion.Design.cast(app.activeProduct)
-        rc = des.rootComponent
-        cur = occ.transform
-        cur_inv = cur.copy()
-        if not cur_inv.invert():
-            return 'current transform not invertible'
-        delta = mat.copy()
-        delta.transformBy(cur_inv)
-
-        coll = adsk.core.ObjectCollection.create()
-        coll.add(occ)
-        mi = rc.features.moveFeatures.createInput2(coll)
-        mi.defineAsFreeMove(delta)
-        rc.features.moveFeatures.add(mi)
-        return None
-    except Exception as e:
-        return str(e)
+        f'_place_occ name={name} want={tuple(round(v, 3) for v in t)} '
+        f'move_err={move_err} post={post}')
 
 
 def _instance(rc, comp, c0, c1, c2, t):
