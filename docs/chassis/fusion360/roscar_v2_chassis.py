@@ -183,8 +183,37 @@ import os
 #                         if-branch. Now raises RuntimeError if Fusion's
 #                         import doesn't actually add an occurrence (was
 #                         silently falling through before).
+#   rev24   2026-04-18  THE REAL fix: user tested rev23 and reported 'all
+#                       aluminum extrusion pieces occupying the same
+#                       space' — even though the dialog said '22 unique
+#                       positions OK'. The dialog was LYING: it was
+#                       reporting the translation tuples we *intended*
+#                       to pass, not the actual post-set transforms.
+#                       Root cause: `importManager.importToTarget2()`
+#                       silently changes the active edit target to the
+#                       newly imported sub-component. Immediately after
+#                       the import, root is no longer the active target
+#                       — and Fusion's `occurrence.transform` setter
+#                       silently fails when the occurrence's parent
+#                       isn't the active edit target. Rev22 correctly
+#                       identified the right occurrence but then asked
+#                       a no-op setter to move it.
+#                       Two-part fix:
+#                       1) `_place_occ` now calls `rootComponent.activate()`
+#                          (or parent-occurrence activate for nested ones)
+#                          before the transform assignment.
+#                       2) After the assignment we READ BACK the actual
+#                          `occ.transform.translation` and compare to the
+#                          intended one. If they disagree, we fall back
+#                          to `_place_via_move` — a MoveFeature-based
+#                          relocation that isn't subject to the
+#                          active-target restriction.
+#                       Verification in the final dialog now reports the
+#                       actual post-set positions (not the intended
+#                       tuples), so we can never again be misled by a
+#                       silent failure.
 # =============================================================================
-VERSION = 'rev23'
+VERSION = 'rev24'
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Dimensions (cm) — multiply mm by 0.1
@@ -334,8 +363,85 @@ def _mat(c0, c1, c2, t):
 
 
 def _place_occ(occ, c0, c1, c2, t):
-    """Position an existing occurrence using column vectors + translation."""
-    occ.transform = _mat(c0, c1, c2, t)
+    """Position an existing occurrence using column vectors + translation.
+
+    CRITICAL (rev24): Fusion's `occurrence.transform` setter silently fails
+    if the occurrence's parent component isn't the currently active edit
+    target. `importManager.importToTarget2()` has been observed to change
+    the active target to the newly imported sub-component — so by the time
+    we call this for a freshly imported occurrence, root (the occurrence's
+    parent) is no longer active. The assignment gets silently rejected and
+    the occurrence stays at identity (origin). That's what caused the user
+    to report 'all aluminum extrusion pieces occupying the same space'
+    even AFTER the rev22 occurrence-identification fix — the right
+    occurrence was being targeted, but the setter was a no-op.
+
+    Fix: explicitly activate the occurrence's parent component before
+    assigning transform. For occurrences directly under root (which is
+    all frame imports), that means re-activating the root component.
+
+    We also read back the actual post-assignment transform to detect
+    silent failures. If the identity transform is still in effect after
+    our call, we fall back to creating a MoveFeature, which isn't subject
+    to the active-target restriction.
+    """
+    mat = _mat(c0, c1, c2, t)
+    try:
+        app = adsk.core.Application.get()
+        des = adsk.fusion.Design.cast(app.activeProduct)
+        ac = occ.assemblyContext  # None if occ is directly under root
+        if ac is None:
+            des.rootComponent.activate()
+        else:
+            # For nested occurrences, activate the immediate parent occurrence.
+            # (Frame imports don't hit this path, but it's future-proof.)
+            try: ac.activate()
+            except Exception: des.rootComponent.activate()
+    except Exception:
+        pass
+    try:
+        occ.transform = mat
+    except Exception as e:
+        _clog.append(f'_place_occ transform set raised: {e}')
+        return
+    # Verify: read back the translation and compare to intended.
+    try:
+        got = occ.transform.translation
+        want_tx, want_ty, want_tz = t
+        if (abs(got.x - want_tx) > 1e-3
+                or abs(got.y - want_ty) > 1e-3
+                or abs(got.z - want_tz) > 1e-3):
+            # Silent failure — fall back to MoveFeature
+            _place_via_move(occ, mat)
+    except Exception as e:
+        _clog.append(f'_place_occ verify raised: {e}')
+
+
+def _place_via_move(occ, mat):
+    """Move an occurrence using a MoveFeature instead of the transform
+    setter. Works even when the parent component isn't the active edit
+    target. Uses the occurrence's current transform as the 'from' state
+    and computes the delta matrix to reach `mat`.
+    """
+    try:
+        app = adsk.core.Application.get()
+        des = adsk.fusion.Design.cast(app.activeProduct)
+        rc = des.rootComponent
+        cur = occ.transform
+        cur_inv = cur.copy()
+        if not cur_inv.invert():
+            _clog.append('_place_via_move: current transform not invertible')
+            return
+        delta = mat.copy()
+        delta.transformBy(cur_inv)
+
+        coll = adsk.core.ObjectCollection.create()
+        coll.add(occ)
+        mi = rc.features.moveFeatures.createInput2(coll)
+        mi.defineAsFreeMove(delta)
+        rc.features.moveFeatures.add(mi)
+    except Exception as e:
+        _clog.append(f'_place_via_move raised: {e}')
 
 
 def _instance(rc, comp, c0, c1, c2, t):
@@ -442,34 +548,54 @@ def run(context):
         app.activeViewport.fit()
         trk = FRAME + 2*M_OFF
 
-        # rev23: position verification — confirm every frame import landed
-        # at a distinct world position. Prior to rev22, importToTarget2
-        # returned the same occurrence on every call, so every _place_occ
-        # after the first re-positioned the SAME occurrence — all 21 other
-        # pieces stayed at identity and stacked at (0,0,0). This summary
-        # makes any regression of that bug instantly visible.
+        # rev24: position verification — read back the ACTUAL post-transform
+        # position of every imported occurrence, NOT the intended tuple. In
+        # rev23 we trusted the tuples we passed in, but the setter was
+        # silently failing and the pieces stayed at identity. Reading back
+        # `occ.transform.translation` tells us what truly landed.
         nfp = len(_frame_positions)
-        unique_pos = {t for _, t in _frame_positions}
-        placement_ok = (len(unique_pos) == nfp) if nfp else True
-        if _frame_positions:
-            xs = [t[0] for _, t in _frame_positions]
-            ys = [t[1] for _, t in _frame_positions]
-            zs = [t[2] for _, t in _frame_positions]
-            bbox = (f'X:[{min(xs):.1f},{max(xs):.1f}]  '
-                    f'Y:[{min(ys):.1f},{max(ys):.1f}]  '
-                    f'Z:[{min(zs):.1f},{max(zs):.1f}] cm')
+        actual = []
+        for nm, intended, occ in _frame_positions:
+            try:
+                tr = occ.transform.translation
+                actual.append((nm, (tr.x, tr.y, tr.z), intended))
+            except Exception:
+                actual.append((nm, (None, None, None), intended))
+        unique_actual = {pos for _, pos, _ in actual if None not in pos}
+        mismatches = [
+            (nm, got, want)
+            for nm, got, want in actual
+            if None in got or any(abs(g - w) > 1e-3 for g, w in zip(got, want))
+        ]
+        placement_ok = (len(unique_actual) == nfp) and not mismatches
+
+        if actual:
+            xs = [p[0] for _, p, _ in actual if p[0] is not None]
+            ys = [p[1] for _, p, _ in actual if p[1] is not None]
+            zs = [p[2] for _, p, _ in actual if p[2] is not None]
+            if xs:
+                bbox = (f'X:[{min(xs):.1f},{max(xs):.1f}]  '
+                        f'Y:[{min(ys):.1f},{max(ys):.1f}]  '
+                        f'Z:[{min(zs):.1f},{max(zs):.1f}] cm')
+            else:
+                bbox = '(no readable positions)'
         else:
             bbox = '(no frame imports)'
 
+        status = 'OK' if placement_ok else f'FAIL ({len(mismatches)} mismatches)'
         msg = (f'ROScar1 v2 ({VERSION})\n'
                f'Frame: {FRAME*10:.0f}mm | Track: {trk*10:.0f}mm\n'
                f'WB: {HWB*20:.0f}mm | H: {(MST+MAST_H+LID_H)*10:.0f}mm\n'
                f'Cut plan: 4x248mm + 4x188mm + 4x100mm posts + 1x120mm mast\n'
                f'Real STEPs: RPi5 + RPLIDAR C1\n\n'
-               f'Frame placement check:\n'
-               f'  {nfp} STEP imports, {len(unique_pos)} unique positions '
-               f'{"OK" if placement_ok else "← REGRESSION!"}\n'
+               f'Frame placement check (ACTUAL post-set positions):\n'
+               f'  {nfp} STEP imports, {len(unique_actual)} unique {status}\n'
                f'  bbox {bbox}')
+        if mismatches:
+            # Show the first 3 mismatches inline so the user sees what went wrong.
+            msg += '\nFirst mismatches (want vs got):'
+            for nm, got, want in mismatches[:3]:
+                msg += f'\n  {nm}: want {want}, got {got}'
         if _clog: msg += f'\nLog: {_clog[0]}'
         ui.messageBox(msg)
     except:
@@ -592,7 +718,7 @@ def _import_rail(rc, name, scale_factor, c0, c1, c2, t):
     _scale_body_y(occ.component, scale_factor)
     _clr_occ(occ, 'frame')
     _place_occ(occ, c0, c1, c2, t)
-    _frame_positions.append((name, t))
+    _frame_positions.append((name, t, occ))
     return occ
 
 
@@ -611,7 +737,7 @@ def _import_bracket(rc, step_path, name, c0, c1, c2, t, color='corner',
     occ = _import_step(rc, step_path, name)
     _clr_occ(occ, color)
     _place_occ(occ, c0, c1, c2, t)
-    _frame_positions.append((name, t))
+    _frame_positions.append((name, t, occ))
     if hide_stubs:
         _hide_bracket_stubs(occ.component)
     return occ
