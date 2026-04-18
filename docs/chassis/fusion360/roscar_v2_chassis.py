@@ -213,7 +213,28 @@ import os
 #                       tuples), so we can never again be misled by a
 #                       silent failure.
 # =============================================================================
-VERSION = 'rev24'
+#   rev25   2026-04-18  Diagnostic instrumentation. rev24 still left
+#                       all 22 imports at (0,0,0) even though _clog was
+#                       empty (no exceptions from either setter or
+#                       MoveFeature fallback). Adds per-call print()
+#                       in _place_occ reporting: pre/post transform
+#                       translations, entityToken, which component was
+#                       activated, whether the setter raised, whether
+#                       the immediate post-set read matched intent,
+#                       whether MoveFeature was used and its result.
+#                       The bridge captures stdout, so we can see
+#                       every call's outcome and isolate which step
+#                       is silently failing.
+# =============================================================================
+VERSION = 'rev25'
+
+# Setting this to False before calling run() suppresses the final
+# summary ui.messageBox (a modal dialog that blocks on the main thread).
+# The bridge add-in flips this for automated runs so it can return
+# results without a human having to click OK. When the script is run
+# manually via Fusion's Scripts and Add-Ins dialog, leave it True so
+# the user still sees the summary.
+SHOW_MSGBOX = True
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Dimensions (cm) — multiply mm by 0.1
@@ -386,35 +407,72 @@ def _place_occ(occ, c0, c1, c2, t):
     to the active-target restriction.
     """
     mat = _mat(c0, c1, c2, t)
+    name = occ.component.name if occ.component else '?'
+
+    # --- DIAGNOSTIC (rev25): capture pre-state ---
+    try:
+        pre_tr = occ.transform.translation
+        pre = (pre_tr.x, pre_tr.y, pre_tr.z)
+    except Exception as e:
+        pre = f'PRE_READ_FAILED: {e}'
+    try:
+        token = occ.entityToken[:16] + '...'
+    except Exception:
+        token = '?'
+
     try:
         app = adsk.core.Application.get()
         des = adsk.fusion.Design.cast(app.activeProduct)
         ac = occ.assemblyContext  # None if occ is directly under root
         if ac is None:
             des.rootComponent.activate()
+            active_kind = 'root'
         else:
-            # For nested occurrences, activate the immediate parent occurrence.
-            # (Frame imports don't hit this path, but it's future-proof.)
-            try: ac.activate()
-            except Exception: des.rootComponent.activate()
-    except Exception:
-        pass
+            try:
+                ac.activate(); active_kind = 'parent'
+            except Exception:
+                des.rootComponent.activate(); active_kind = 'root(fallback)'
+    except Exception as e:
+        active_kind = f'activate_failed:{e}'
+
+    setter_raised = None
     try:
         occ.transform = mat
     except Exception as e:
-        _clog.append(f'_place_occ transform set raised: {e}')
-        return
-    # Verify: read back the translation and compare to intended.
+        setter_raised = str(e)
+        _clog.append(f'_place_occ[{name}] transform set raised: {e}')
+
+    # --- DIAGNOSTIC: post-setter read ---
     try:
-        got = occ.transform.translation
-        want_tx, want_ty, want_tz = t
-        if (abs(got.x - want_tx) > 1e-3
-                or abs(got.y - want_ty) > 1e-3
-                or abs(got.z - want_tz) > 1e-3):
-            # Silent failure — fall back to MoveFeature
-            _place_via_move(occ, mat)
+        post_tr = occ.transform.translation
+        post = (post_tr.x, post_tr.y, post_tr.z)
     except Exception as e:
-        _clog.append(f'_place_occ verify raised: {e}')
+        post = f'POST_READ_FAILED: {e}'
+
+    setter_ok = (
+        isinstance(post, tuple)
+        and abs(post[0] - t[0]) <= 1e-3
+        and abs(post[1] - t[1]) <= 1e-3
+        and abs(post[2] - t[2]) <= 1e-3
+    )
+    move_raised = None
+    move_post = None
+    if not setter_ok and setter_raised is None:
+        # Silent failure — fall back to MoveFeature
+        move_raised = _place_via_move(occ, mat)
+        try:
+            mp = occ.transform.translation
+            move_post = (mp.x, mp.y, mp.z)
+        except Exception as e:
+            move_post = f'MOVE_POST_READ_FAILED: {e}'
+
+    # Emit a single line of diagnostics per call. Goes to stdout which
+    # the bridge captures.
+    print(
+        f'_place_occ name={name} token={token} want={tuple(round(v,3) for v in t)} '
+        f'pre={pre} active={active_kind} setter_raised={setter_raised} '
+        f'post={post} setter_ok={setter_ok} '
+        f'move_raised={move_raised} move_post={move_post}')
 
 
 def _place_via_move(occ, mat):
@@ -422,6 +480,8 @@ def _place_via_move(occ, mat):
     setter. Works even when the parent component isn't the active edit
     target. Uses the occurrence's current transform as the 'from' state
     and computes the delta matrix to reach `mat`.
+
+    Returns None on success, an error string on failure — for diagnostics.
     """
     try:
         app = adsk.core.Application.get()
@@ -430,8 +490,7 @@ def _place_via_move(occ, mat):
         cur = occ.transform
         cur_inv = cur.copy()
         if not cur_inv.invert():
-            _clog.append('_place_via_move: current transform not invertible')
-            return
+            return 'current transform not invertible'
         delta = mat.copy()
         delta.transformBy(cur_inv)
 
@@ -440,8 +499,9 @@ def _place_via_move(occ, mat):
         mi = rc.features.moveFeatures.createInput2(coll)
         mi.defineAsFreeMove(delta)
         rc.features.moveFeatures.add(mi)
+        return None
     except Exception as e:
-        _clog.append(f'_place_via_move raised: {e}')
+        return str(e)
 
 
 def _instance(rc, comp, c0, c1, c2, t):
@@ -597,9 +657,16 @@ def run(context):
             for nm, got, want in mismatches[:3]:
                 msg += f'\n  {nm}: want {want}, got {got}'
         if _clog: msg += f'\nLog: {_clog[0]}'
-        ui.messageBox(msg)
+        # Always print so the bridge can capture it; only popup a modal
+        # dialog when a human is running the script interactively.
+        print(msg)
+        if SHOW_MSGBOX:
+            ui.messageBox(msg)
     except:
-        if ui: ui.messageBox(f'FAIL ({VERSION}):\n{traceback.format_exc()}')
+        tb = traceback.format_exc()
+        print(f'FAIL ({VERSION}):\n{tb}')
+        if ui and SHOW_MSGBOX:
+            ui.messageBox(f'FAIL ({VERSION}):\n{tb}')
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Primitives

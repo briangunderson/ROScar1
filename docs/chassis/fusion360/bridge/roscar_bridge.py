@@ -155,8 +155,17 @@ def _cmd_run_script(path):
     stderr_cap = io.StringIO()
     old_out, old_err = sys.stdout, sys.stderr
     sys.stdout, sys.stderr = stdout_cap, stderr_cap
+
     try:
         spec.loader.exec_module(mod)
+        # Cooperative no-modal-dialog protocol: if the target script
+        # defines a SHOW_MSGBOX module-level flag, set it to False before
+        # invoking run() so the script prints its summary instead of
+        # blocking on a modal dialog. Scripts that don't expose the flag
+        # still work — they just behave as usual (and the bridge will
+        # hang until a human dismisses the dialog).
+        if hasattr(mod, 'SHOW_MSGBOX'):
+            mod.SHOW_MSGBOX = False
         if hasattr(mod, 'run'):
             mod.run({})
     finally:
