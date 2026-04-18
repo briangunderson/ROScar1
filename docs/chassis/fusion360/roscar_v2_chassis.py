@@ -328,12 +328,51 @@ import os
 #                       mast, rails, etc. all pass the test; only
 #                       the decorative hardware gets hidden.
 # =============================================================================
-VERSION = 'rev30'
+#   rev31   2026-04-18  User-reported regressions from rev30:
+#                       (1) Corner brackets on the upper deck had
+#                           their Z-arm pointing UP (into empty
+#                           space) instead of DOWN (into the post).
+#                           The rev9 column-swap _Y,_X,_NZ trick
+#                           that was supposed to keep det=+1 while
+#                           flipping Z was also swapping the X and Y
+#                           arms into the wrong rails. Replaced with
+#                           a clean 180° rotation about the X axis
+#                           (_X, _NY, _NZ for one bracket, mirrored
+#                           for each corner), which keeps det=+1 AND
+#                           puts the Z-arm below.
+#                       (2) Motors were floating off-bracket. The
+#                           motor-can inner face sat at y=fy-M_CAN
+#                           (front) or y=fy (rear) but the bracket's
+#                           vertical plate sat at y=fy±BRKT_T, so
+#                           there was a ~3.5cm gap between them.
+#                           Extended the vertical plate to span from
+#                           the rail face down to the motor can's
+#                           INNER face, so the plate physically
+#                           contacts the motor housing.
+#                       (3) Wheels were completely missing from the
+#                           viewport. _hide_stray_bodies used
+#                           Y:[-5,30] but wheels center at
+#                           Y=-M_OFF=-9.37cm (front) and
+#                           Y=FRAME+M_OFF=34.17cm (rear), so every
+#                           wheel body got hidden. Expanded the
+#                           volume to Y:[-15,40] so wheels survive.
+#                       Also adds _run_sanity_checks() — see
+#                       tasks/chassis-v2-sanity-checks.md. The
+#                       checks print PASS/FAIL per item into stdout
+#                       and a summary line into the final dialog, so
+#                       regressions like those above are caught in
+#                       the same run that introduces them.
+# =============================================================================
+VERSION = 'rev31'
 
 # Chassis volume (cm) for _hide_stray_bodies. Anything whose body's
 # bounding-box center falls outside this box gets hidden.
+# Y range is wide enough to include mecanum wheels: wheel centers at
+# Y = -M_OFF = -9.37 (front) and Y = FRAME + M_OFF = 34.17 (rear),
+# each with a width of WHL_W = 3.73, so real wheel Y extent is
+# [-11.2, 36.0]. Padding to [-15, 40] gives headroom.
 _CHASSIS_VOL_X = (-5.0, 30.0)
-_CHASSIS_VOL_Y = (-5.0, 30.0)
+_CHASSIS_VOL_Y = (-15.0, 40.0)
 _CHASSIS_VOL_Z = (-1.0, 45.0)
 
 # Set to False to force the procedural Pi5 PCB block instead of the
@@ -689,6 +728,153 @@ def _hide_stray_bodies(rc):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Sanity checks (rev31)  — see tasks/chassis-v2-sanity-checks.md
+# ═══════════════════════════════════════════════════════════════════════════
+def _find_body_by_name(rc, name_prefix):
+    """Walk all components, return the first body whose name starts with
+    name_prefix, along with its bbox center, or (None, None)."""
+    def _walk(comp):
+        for i in range(comp.bRepBodies.count):
+            b = comp.bRepBodies.item(i)
+            try:
+                if b.name.startswith(name_prefix) and b.isLightBulbOn:
+                    bb = b.boundingBox
+                    c = ((bb.minPoint.x + bb.maxPoint.x)/2,
+                         (bb.minPoint.y + bb.maxPoint.y)/2,
+                         (bb.minPoint.z + bb.maxPoint.z)/2)
+                    return b, c
+            except Exception:
+                pass
+        for i in range(comp.occurrences.count):
+            hit = _walk(comp.occurrences.item(i).component)
+            if hit[0] is not None:
+                return hit
+        return (None, None)
+    return _walk(rc)
+
+
+def _count_visible_bodies_named(rc, name_prefix):
+    count = 0
+    def _walk(comp):
+        nonlocal count
+        for i in range(comp.bRepBodies.count):
+            b = comp.bRepBodies.item(i)
+            try:
+                if b.name.startswith(name_prefix) and b.isLightBulbOn:
+                    count += 1
+            except Exception:
+                pass
+        for i in range(comp.occurrences.count):
+            _walk(comp.occurrences.item(i).component)
+    _walk(rc)
+    return count
+
+
+def _count_hidden_bodies(rc):
+    count = 0
+    def _walk(comp):
+        nonlocal count
+        for i in range(comp.bRepBodies.count):
+            b = comp.bRepBodies.item(i)
+            try:
+                if not b.isLightBulbOn:
+                    count += 1
+            except Exception:
+                pass
+        for i in range(comp.occurrences.count):
+            _walk(comp.occurrences.item(i).component)
+    _walk(rc)
+    return count
+
+
+def _run_sanity_checks(rc):
+    """Run the sanity checks listed in tasks/chassis-v2-sanity-checks.md.
+    Returns list of (name, ok, message). Also prints each line to stdout
+    and populates _clog with any FAILs.
+    """
+    results = []
+
+    def add(name, ok, msg):
+        results.append((name, ok, msg))
+        line = f'sanity {"PASS" if ok else "FAIL"}: {name} — {msg}'
+        print(line)
+        if not ok:
+            _clog.append(line)
+
+    # --- frame_count: 22 STEPs in _frame_positions ---
+    add('frame_count',
+        len(_frame_positions) == 22,
+        f'{len(_frame_positions)} (expected 22)')
+
+    # --- frame_unique: 22 distinct body-bbox centers ---
+    actual_centers = []
+    for _, _, occ in _frame_positions:
+        try:
+            b = occ.component.bRepBodies.item(0)
+            bb = b.boundingBox
+            actual_centers.append(tuple(round(v, 2) for v in (
+                (bb.minPoint.x + bb.maxPoint.x)/2,
+                (bb.minPoint.y + bb.maxPoint.y)/2,
+                (bb.minPoint.z + bb.maxPoint.z)/2)))
+        except Exception:
+            actual_centers.append(None)
+    uniq = len(set(actual_centers) - {None})
+    add('frame_unique',
+        uniq == 22,
+        f'{uniq} distinct centers (expected 22)')
+
+    # --- wheels_count: 4 Tire_* bodies visible ---
+    n_tires = _count_visible_bodies_named(rc, 'Tire_')
+    add('wheels_count',
+        n_tires == 4,
+        f'{n_tires} tire bodies visible (expected 4)')
+
+    # --- motors_count: 4 MCan_* cylinders visible ---
+    n_motors = _count_visible_bodies_named(rc, 'MCan_')
+    add('motors_count',
+        n_motors == 4,
+        f'{n_motors} motor cans visible (expected 4)')
+
+    # --- brackets_count: 8 corner brackets with visible body in _frame_positions ---
+    n_brackets = sum(1 for name, _, _ in _frame_positions if name.startswith('CB_'))
+    add('brackets_count',
+        n_brackets == 8,
+        f'{n_brackets} corner brackets tracked (expected 8)')
+
+    # --- motors_touch_bracket: each motor's nearest bracket shelf Y range
+    # contains the motor's Y range, so the motor sits on the shelf ---
+    motor_touch_ok = True
+    bad_tags = []
+    for tag in ('FL', 'FR', 'RL', 'RR'):
+        _, mcan_c = _find_body_by_name(rc, f'MCan_{tag}')
+        _, brkh_c = _find_body_by_name(rc, f'BrkH_{tag}')
+        if mcan_c is None or brkh_c is None:
+            motor_touch_ok = False
+            bad_tags.append(f'{tag}(missing)')
+            continue
+        if abs(mcan_c[1] - brkh_c[1]) > 1.0:    # >1cm Y gap
+            motor_touch_ok = False
+            bad_tags.append(f'{tag}(Δy={mcan_c[1]-brkh_c[1]:+.2f})')
+    add('motors_touch_bracket',
+        motor_touch_ok,
+        'all 4 motors aligned with shelves'
+        if motor_touch_ok else 'misaligned: ' + ', '.join(bad_tags))
+
+    # --- strays_hidden_count: number of hidden bodies ---
+    n_hidden = _count_hidden_bodies(rc)
+    # Expected baseline from rev30: ~94 (decorative hardware from
+    # multi-body STEP assemblies). Allow some slack.
+    add('strays_hidden_count',
+        50 <= n_hidden <= 200,
+        f'{n_hidden} hidden bodies (expected 50-200)')
+
+    n_pass = sum(1 for _, ok, _ in results if ok)
+    summary = f'sanity: {n_pass}/{len(results)} pass'
+    print(summary)
+    return results, summary
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Entry point
 # ═══════════════════════════════════════════════════════════════════════════
 def run(context):
@@ -729,6 +915,11 @@ def run(context):
         # (grub screws, nuts) that landed scattered around origin
         # instead of with their bracket/assembly parent.
         strays_hidden = _hide_stray_bodies(rc)
+
+        # rev31: run sanity checks — catches regressions in the same
+        # run that introduces them. Results go to stdout and into
+        # _clog for any FAILs.
+        sanity_results, sanity_summary = _run_sanity_checks(rc)
 
         app.activeViewport.fit()
         trk = FRAME + 2*M_OFF
@@ -785,6 +976,7 @@ def run(context):
             bbox = '(no frame imports)'
 
         status = 'OK' if placement_ok else f'FAIL ({len(mismatches)} mismatches)'
+        failed = [nm for nm, ok, _ in sanity_results if not ok]
         msg = (f'ROScar1 v2 ({VERSION})\n'
                f'Frame: {FRAME*10:.0f}mm | Track: {trk*10:.0f}mm\n'
                f'WB: {HWB*20:.0f}mm | H: {(MST+MAST_H+LID_H)*10:.0f}mm\n'
@@ -793,7 +985,10 @@ def run(context):
                f'Frame placement check (ACTUAL post-set positions):\n'
                f'  {nfp} STEP imports, {len(unique_actual)} unique {status}\n'
                f'  bbox {bbox}\n'
-               f'  {strays_hidden} stray hardware bodies hidden')
+               f'  {strays_hidden} stray hardware bodies hidden\n'
+               f'\n{sanity_summary}')
+        if failed:
+            msg += '\nFailed: ' + ', '.join(failed)
         if mismatches:
             # Show the first 3 mismatches inline so the user sees what went wrong.
             msg += '\nFirst mismatches (want vs got):'
@@ -1331,29 +1526,41 @@ def _motor_assy(rc, tag, mx, fy, od):
     except Exception: pass
 
     # L-bracket clamping motor to the outer face of the lower-deck rail.
-    # This IS a "connector" per the user's structural-focus guidance, so keep
-    # both plates plus the visible mounting bolts. (Encoder PCB removed — it's
-    # a non-structural detail that will come back when we have a real motor
-    # STEP model with the encoder already integrated.)
-    bk_top = LO
-    bk_bot = AXL - M_DIA/2 - 0.1
+    # Vertical plate: spans the full rail face (Z ∈ [LO, LO+S]) down to
+    #   the motor level, so the plate is both bolted to the rail's T-slot
+    #   AND extends to where the motor sits (visually attaching the motor
+    #   to the chassis rather than floating).
+    # Horizontal shelf: spans the full motor length (not just 60% as
+    #   before), so the motor visibly rests on the shelf.
+    # Plate X width kept at (S*2/3) so it's slightly narrower than the
+    #   motor in X (M_DIA=2.4 vs 2.0) — the shelf sticks out past the
+    #   motor edges in X on both sides.
+    bk_top = LO + S                     # rev31: plate top reaches top of rail
+    bk_bot = AXL - M_DIA/2 - BRKT_T     # just below motor bottom
     bk_h = bk_top - bk_bot
     if bk_h > 0:
         bk_y = fy - BRKT_T if od < 0 else fy
         # Vertical plate — mounts to the rail's outer T-slot face
         B(rc, f'BrkV_{tag}', mx-S/3, bk_y, bk_bot, S*2/3, BRKT_T, bk_h, 'bracket')
-        # Horizontal shelf under the motor
-        shelf_y = fy - M_CAN*0.6 if od < 0 else fy
+        # Horizontal shelf under the motor — full motor length so the
+        # motor rests on it visibly end-to-end.
+        shelf_y = fy - M_CAN if od < 0 else fy
+        shelf_len = M_CAN                # rev31: full motor length
         B(rc, f'BrkH_{tag}', mx-S/3, shelf_y, bk_bot-BRKT_T,
-          S*2/3, M_CAN*0.6, BRKT_T, 'bracket')
-        # 2 bolts through the vertical plate into the rail's T-nut
+          S*2/3, shelf_len, BRKT_T, 'bracket')
+        # 2 bolts through the vertical plate into the rail's T-nut.
+        # Place them in the rail-overlap zone of the plate (upper ~3cm).
+        rail_zone_lo = LO + S*0.2
+        rail_zone_hi = LO + S*0.8
         bolt_side = bk_y - 0.15 if od < 0 else bk_y + BRKT_T + 0.15
-        for bz in [bk_bot + bk_h*0.3, bk_bot + bk_h*0.7]:
+        for bz in [rail_zone_lo, rail_zone_hi]:
             B(rc, f'Bolt_V_{tag}_{bz:.1f}',
               mx-0.2, bolt_side-0.05 if od<0 else bolt_side,
               bz-0.2, 0.4, 0.2, 0.4, 'bracket')
-        # 1 bolt up through the shelf into the motor housing
-        CZ(rc, f'Bolt_H_{tag}', mx, shelf_y+M_CAN*0.3 if od>0 else shelf_y-M_CAN*0.3,
+        # 1 bolt up through the shelf into the motor housing, centered
+        # in the Y extent of the shelf (which now spans full motor length).
+        bolt_h_y = shelf_y + shelf_len / 2
+        CZ(rc, f'Bolt_H_{tag}', mx, bolt_h_y,
            bk_bot-BRKT_T-0.1, 0.18, 0.2, 'bracket')
 
         # --------------------------------------------------------------

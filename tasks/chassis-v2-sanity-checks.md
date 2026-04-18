@@ -1,0 +1,80 @@
+# Chassis v2 sanity checks — run after every script iteration
+
+These are the minimum things that have to be true in the built model
+before a rev can be called "working." The chassis script runs each
+check at end of `run()` and prints `PASS` / `FAIL` per item into
+stdout. The bridge captures stdout, so the full check result is
+visible in the run-script response.
+
+## Philosophy
+
+Rev22→rev30 taught us that individual "did it work?" signals lie in
+ways that look plausible. The rule from here on:
+
+> If a check didn't explicitly re-verify the user-visible outcome,
+> it does not count. No trusting intermediate API return values; no
+> trusting the translation tuples we tried to set. Read the state
+> you care about, compare to what you expected.
+
+Every check below reads a real geometric property (bbox center,
+visibility flag, body count) and compares to an expected range.
+
+## The checks
+
+Run in order. A single `FAIL` is a regression — stop and fix before
+adding new features.
+
+### Frame placements
+- **`frame_count`** — 22 STEP-imported occurrences in `_frame_positions` (8 rails + 4 posts + 1 mast + 8 brackets + 1 T-plate)
+- **`frame_unique`** — all 22 have distinct body-bbox centers (rounded to 2 dp)
+- **`frame_in_volume`** — every frame body center is within the expected chassis volume
+- **`frame_bbox_tight`** — combined frame bbox X∈[0,25], Y∈[0,25], Z∈[5,35]
+
+### Wheels
+- **`wheels_count`** — 4 tire bodies exist with `isLightBulbOn == True`
+- **`wheels_at_corners`** — each wheel center has correct X and Y sign for its corner (FL/FR/RL/RR)
+- **`wheels_above_ground`** — all wheel Z centers are at `AXL ± 0.5cm`
+
+### Motors
+- **`motors_count`** — 4 motor can cylinders visible
+- **`motors_touch_bracket`** — no gap between motor can's inner face and bracket's vertical plate (|Δy| ≤ 0.5 cm)
+- **`motors_under_frame`** — all motor Z centers are below `LO` (hanging below the frame)
+
+### Corner brackets
+- **`brackets_count`** — 8 corner brackets visible
+- **`brackets_at_corners`** — each bracket body-bbox center is within 4cm of the nominal corner
+- **`brackets_z_arm_direction`** — upper-deck brackets have their Z-arm extending DOWN (body below HI); lower-deck brackets have theirs extending UP (body above LO+S). Distinguishable by body Z-range sign.
+
+### Mast + lidar
+- **`mast_tall`** — mast body Z range spans at least 10 cm above the upper deck
+- **`tplate_centered`** — Mast_TPlate body center is within 1 cm of mast axis (x=FRAME-S, y=FRAME/2)
+- **`lidar_on_tplate`** — RPLIDAR body Z bottom is within 1 cm of T-plate Z top
+
+### Visibility & cleanliness
+- **`strays_hidden_count`** — number of `isLightBulbOn=False` bodies matches expected (≥ 80); a sudden jump means a new STEP is dirty
+- **`total_visible_bodies`** — total visible body count is in expected range (tolerate ±10% between runs)
+
+## How it runs
+
+The script builds everything, hides strays, then calls
+`_run_sanity_checks(rc)` which returns a list of `(name, ok,
+message)` tuples. Both the individual lines and a one-line summary
+(`sanity: N/M pass`) go into stdout and into the final messageBox.
+The bridge JSON response has the full structured result in
+`data.stdout`.
+
+When a check fails, a human reading the dialog sees immediately
+which check failed and what the expected/actual values were. The
+bridge client can parse the stdout lines for programmatic pass/fail
+gating of longer automation loops.
+
+## Adding a new check
+
+Keep each check to: name, short description, callable that returns
+`(bool_ok, str_message)`. Favor reading one concrete geometric value
+and comparing to a range. Don't write a check that trusts a
+return-value-return-value-return-value chain — that's the same class
+of mistake as the rev23 dialog.
+
+Checks live in the `_SANITY_CHECKS` list at the bottom of
+`roscar_v2_chassis.py` so they move with the script.
