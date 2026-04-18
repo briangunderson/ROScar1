@@ -154,7 +154,7 @@ import os
 #                       does name matching as a backup for nested
 #                       sub-occurrences.
 # =============================================================================
-VERSION = 'rev19'
+VERSION = 'rev20'
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Dimensions (cm) — multiply mm by 0.1
@@ -208,7 +208,7 @@ PAL = {
     'lidar':    (30, 30, 38),      # lidar dark
     'camera':   (50, 50, 58),      # camera body
     'bracket':  (230, 120, 30),    # orange (motor L-brackets) — pops against frame
-    'corner':   (205, 160, 75),    # brass/gold — maximally distinct from the aluminum rails so brackets and rails don't visually blend together
+    'corner':   (218, 135, 25),    # bold brass/copper — needs to pop vs tan plates AND silver rails
     'ground':   (85, 90, 98),      # warm gray floor
     'hub':      (135, 140, 150),   # wheel hub
     'standoff': (185, 190, 200),   # standoffs silver-ish
@@ -534,7 +534,7 @@ def _import_bracket(rc, step_path, name, c0, c1, c2, t, color='corner',
     return occ
 
 
-def _hide_bracket_stubs(comp, max_body_len_cm=5.0):
+def _hide_bracket_stubs(comp, max_body_len_cm=8.0):
     """Turn off visibility of any body that's too long to be a bracket body
     or grub screw — those are the decorative stub extrusions that overlap
     the real structural rails/posts.
@@ -542,7 +542,9 @@ def _hide_bracket_stubs(comp, max_body_len_cm=5.0):
     Real 3-way corner bracket body is <= 30x30x30 mm (3cm max).
     M6 grub screws are <= 10mm long.
     Stub extrusions are ~100mm (10cm) long.
-    Threshold default of 5cm comfortably separates them.
+    T-plates are up to 85mm in their long dimension.
+    Threshold default of 8cm safely hides only stubs (10cm) while keeping
+    bracket bodies, grub screws, AND T-plates visible.
 
     Walks the imported component tree recursively — also checks bodies in
     nested sub-occurrences (Fusion's STEP importer puts assembly parts in
