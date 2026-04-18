@@ -302,8 +302,39 @@ import os
 #                       USE_RPI5_STEP flag lets future runs re-enable
 #                       the real STEP for experimentation without
 #                       editing multiple lines.
+#                       Also fixed the T-plate placement: the STEP
+#                       has its origin at a corner (body 9x9x0.4cm),
+#                       so passing (FRAME-S, FRAME/2) landed the
+#                       corner at the mast position and stuck the
+#                       plate out 4.5cm past the rear of the chassis.
+#                       Shifted by -4.5cm in X/Y to center on the
+#                       mast; Z adjusted -0.2cm so the top face
+#                       aligns with MST.
+#   rev30   2026-04-18  Integrated stray-body cleanup into the
+#                       chassis script itself. Multi-body STEP
+#                       imports (corner brackets, T-plate, RPLIDAR)
+#                       include nested grub screws / nuts / small
+#                       hardware whose sub-occurrences have non-
+#                       identity local transforms — rev28's
+#                       recursive body-move translates them but
+#                       each ends up at its own sub-local-frame
+#                       offset from the assembly's target position,
+#                       which in practice parks ~94 tiny specks
+#                       scattered around origin. A post-build
+#                       _hide_stray_bodies() pass walks every body
+#                       and turns off isLightBulbOn for anything
+#                       whose bbox center is outside the chassis
+#                       volume. The real structural bracket bodies,
+#                       mast, rails, etc. all pass the test; only
+#                       the decorative hardware gets hidden.
 # =============================================================================
-VERSION = 'rev29'
+VERSION = 'rev30'
+
+# Chassis volume (cm) for _hide_stray_bodies. Anything whose body's
+# bounding-box center falls outside this box gets hidden.
+_CHASSIS_VOL_X = (-5.0, 30.0)
+_CHASSIS_VOL_Y = (-5.0, 30.0)
+_CHASSIS_VOL_Z = (-1.0, 45.0)
 
 # Set to False to force the procedural Pi5 PCB block instead of the
 # real STEP import. Rev28's recursive body-move couldn't rigidly
@@ -614,6 +645,50 @@ def _check_centered(occ, label):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Stray-body cleanup (rev30)
+# ═══════════════════════════════════════════════════════════════════════════
+def _hide_stray_bodies(rc):
+    """Hide any body whose bounding-box center is outside the chassis
+    volume. Cleans up the nested hardware (grub screws, nuts, bracket
+    detail pieces) that came along with multi-body STEP assemblies and
+    landed at their sub-local-frame origins instead of the target.
+
+    Returns the number of bodies hidden.
+    """
+    xmin, xmax = _CHASSIS_VOL_X
+    ymin, ymax = _CHASSIS_VOL_Y
+    zmin, zmax = _CHASSIS_VOL_Z
+    total = [0]
+
+    def _walk(comp):
+        for i in range(comp.bRepBodies.count):
+            body = comp.bRepBodies.item(i)
+            try:
+                bb = body.boundingBox
+                cx = (bb.minPoint.x + bb.maxPoint.x) / 2
+                cy = (bb.minPoint.y + bb.maxPoint.y) / 2
+                cz = (bb.minPoint.z + bb.maxPoint.z) / 2
+                if (cx < xmin or cx > xmax
+                        or cy < ymin or cy > ymax
+                        or cz < zmin or cz > zmax):
+                    try:
+                        body.isLightBulbOn = False
+                        total[0] += 1
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        for i in range(comp.occurrences.count):
+            _walk(comp.occurrences.item(i).component)
+
+    try:
+        _walk(rc)
+    except Exception as e:
+        _clog.append(f'_hide_stray_bodies: {e}')
+    return total[0]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Entry point
 # ═══════════════════════════════════════════════════════════════════════════
 def run(context):
@@ -649,6 +724,11 @@ def run(context):
         _drive(_comp(rc, '5 - Drive System'))
         _wiring(_comp(rc, '6 - Wiring'))
         _ground(_comp(rc, '7 - Ground Plane'))
+
+        # rev30: hide stray hardware from multi-body STEP assemblies
+        # (grub screws, nuts) that landed scattered around origin
+        # instead of with their bracket/assembly parent.
+        strays_hidden = _hide_stray_bodies(rc)
 
         app.activeViewport.fit()
         trk = FRAME + 2*M_OFF
@@ -709,10 +789,11 @@ def run(context):
                f'Frame: {FRAME*10:.0f}mm | Track: {trk*10:.0f}mm\n'
                f'WB: {HWB*20:.0f}mm | H: {(MST+MAST_H+LID_H)*10:.0f}mm\n'
                f'Cut plan: 4x248mm + 4x188mm + 4x100mm posts + 1x120mm mast\n'
-               f'Real STEPs: RPi5 + RPLIDAR C1\n\n'
+               f'Real STEPs: RPLIDAR C1 (Pi5 = procedural block)\n\n'
                f'Frame placement check (ACTUAL post-set positions):\n'
                f'  {nfp} STEP imports, {len(unique_actual)} unique {status}\n'
-               f'  bbox {bbox}')
+               f'  bbox {bbox}\n'
+               f'  {strays_hidden} stray hardware bodies hidden')
         if mismatches:
             # Show the first 3 mismatches inline so the user sees what went wrong.
             msg += '\nFirst mismatches (want vs got):'
