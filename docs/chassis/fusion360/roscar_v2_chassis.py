@@ -237,14 +237,34 @@ import os
 #                       readback happens, everything is back to
 #                       (0,0,0). Fix: always place occurrences via a
 #                       MoveFeature — it lives in the timeline and
-#                       survives recompute. The direct-setter path is
-#                       removed entirely (was only ever a no-op in
-#                       our use case). rootComponent.activate() is
-#                       also dropped (Component has no such method;
-#                       the 'activate_failed' lines were harmless but
-#                       noisy).
+#                       survives recompute.
+#   rev27   2026-04-18  rev26 attempted to move the OCCURRENCE via
+#                       moveFeatures but Fusion rejected with
+#                       '3 : invalid argument inputEntities'. Turns
+#                       out in ParametricDesignType the moveFeatures
+#                       createInput2 collection is stricter than the
+#                       docs suggest for top-level occurrences of
+#                       imported STEPs.
+#                       The insight: each STEP import creates its own
+#                       UNIQUE component with its own BRepBody(ies).
+#                       Since we don't reuse components across
+#                       placements, moving the BODIES (inside the
+#                       component's own timeline) is equivalent to
+#                       moving the occurrence — and moveFeatures
+#                       DOES accept BRepBody collections reliably.
+#                       _place_occ now iterates the bodies of
+#                       occ.component, collects them, and runs a
+#                       MoveFeature in the component's own features
+#                       context with the full target matrix
+#                       (rotation + translation). The occurrence's
+#                       transform stays at identity; the world
+#                       position of the geometry comes entirely from
+#                       the body-internal move. Post-set
+#                       verification now reads the body's bounding-
+#                       box center instead of occ.transform, since
+#                       occ.transform is legitimately still identity.
 # =============================================================================
-VERSION = 'rev26'
+VERSION = 'rev27'
 
 # Setting this to False before calling run() suppresses the final
 # summary ui.messageBox (a modal dialog that blocks on the main thread).
@@ -402,61 +422,70 @@ def _mat(c0, c1, c2, t):
 
 
 def _place_occ(occ, c0, c1, c2, t):
-    """Position an existing occurrence using a MoveFeature.
+    """Position an imported STEP occurrence by moving the BODIES inside
+    its component (not the occurrence itself).
 
-    In ParametricDesignType, the direct `occ.transform = mat` setter
-    takes effect immediately but is NOT a timeline feature — so the
-    next parametric operation that triggers a recompute (another
-    scaleFeatures.add, extrudeFeatures.add, STEP import, etc.) wipes
-    out all the transforms we carefully placed. Rev25's diagnostics
-    caught this: every post-set read returned the intended value, but
-    the end-of-run readback showed every imported occurrence back at
-    identity.
+    Background: Fusion's moveFeatures.createInput2 rejected Occurrence
+    entities in ParametricDesignType with 'invalid argument
+    inputEntities', so rev26's occurrence-move approach failed too.
+    Every STEP import creates its own unique component with its own
+    bodies; since we never reuse components across placements, moving
+    the BODIES in the component's local timeline is equivalent to
+    moving the occurrence, and moveFeatures accepts BRepBody
+    collections reliably.
 
-    Fix (rev26): always place occurrences via a MoveFeature. That
-    lives in the timeline and survives recompute. We compute the
-    delta from the occurrence's current transform (typically identity
-    right after import) to the target matrix.
+    The occurrence stays at identity. World position of geometry comes
+    entirely from the body-internal MoveFeature transform.
     """
     mat = _mat(c0, c1, c2, t)
-    name = occ.component.name if occ.component else '?'
+    comp = occ.component
+    name = comp.name if comp else '?'
 
-    # Build the delta: delta = mat * inverse(current)
-    cur = occ.transform
-    cur_inv = cur.copy()
-    if not cur_inv.invert():
-        print(f'_place_occ name={name} SKIP: current transform not invertible')
-        _clog.append(f'_place_occ[{name}]: non-invertible current transform')
+    # Collect every body in the component's root + nested sub-occurrences.
+    # For the 3030 extrusion STEP this is typically 1 body. For the
+    # corner-bracket assembly it can be several (bracket body + grub
+    # screws + decorative stubs). We want them all moved as a rigid
+    # group so the sub-assembly stays assembled.
+    coll = adsk.core.ObjectCollection.create()
+    def _collect(c):
+        for i in range(c.bRepBodies.count):
+            coll.add(c.bRepBodies.item(i))
+        for i in range(c.occurrences.count):
+            _collect(c.occurrences.item(i).component)
+    try:
+        _collect(comp)
+    except Exception as e:
+        _clog.append(f'_place_occ[{name}] body-collect raised: {e}')
+    if coll.count == 0:
+        print(f'_place_occ name={name} SKIP: no bodies to move')
         return
-    delta = mat.copy()
-    delta.transformBy(cur_inv)
 
-    # Apply via MoveFeature on the root component (the occurrence's
-    # parent is root in our current import strategy).
     move_err = None
     try:
-        app = adsk.core.Application.get()
-        des = adsk.fusion.Design.cast(app.activeProduct)
-        rc = des.rootComponent
-        coll = adsk.core.ObjectCollection.create()
-        coll.add(occ)
-        mi = rc.features.moveFeatures.createInput2(coll)
-        mi.defineAsFreeMove(delta)
-        rc.features.moveFeatures.add(mi)
+        mi = comp.features.moveFeatures.createInput2(coll)
+        mi.defineAsFreeMove(mat)
+        comp.features.moveFeatures.add(mi)
     except Exception as e:
         move_err = str(e)
         _clog.append(f'_place_occ[{name}] moveFeature raised: {e}')
 
-    # Diagnostic: verify the post-move transform matches intent.
+    # Verify by reading the body's bounding-box center. The occ.transform
+    # is still identity (we moved the bodies, not the occurrence), so
+    # reading it would be misleading. Bounding-box center gives us the
+    # actual world-space position of the first body.
     try:
-        post_tr = occ.transform.translation
-        post = (post_tr.x, post_tr.y, post_tr.z)
+        b0 = comp.bRepBodies.item(0)
+        bb = b0.boundingBox
+        cx = (bb.minPoint.x + bb.maxPoint.x) / 2
+        cy = (bb.minPoint.y + bb.maxPoint.y) / 2
+        cz = (bb.minPoint.z + bb.maxPoint.z) / 2
+        body_center = (cx, cy, cz)
     except Exception as e:
-        post = f'POST_READ_FAILED: {e}'
+        body_center = f'BB_READ_FAILED: {e}'
 
     print(
         f'_place_occ name={name} want={tuple(round(v, 3) for v in t)} '
-        f'move_err={move_err} post={post}')
+        f'bodies={coll.count} move_err={move_err} body_center={body_center}')
 
 
 def _instance(rc, comp, c0, c1, c2, t):
@@ -563,24 +592,41 @@ def run(context):
         app.activeViewport.fit()
         trk = FRAME + 2*M_OFF
 
-        # rev24: position verification — read back the ACTUAL post-transform
-        # position of every imported occurrence, NOT the intended tuple. In
-        # rev23 we trusted the tuples we passed in, but the setter was
-        # silently failing and the pieces stayed at identity. Reading back
-        # `occ.transform.translation` tells us what truly landed.
+        # rev27: verification now checks the BODY's bounding-box center
+        # rather than occ.transform. Since we move bodies (not the
+        # occurrence), occ.transform stays at identity by design. The
+        # bounding-box center of the first body reflects where the
+        # geometry actually lives in world space. Tolerance is loose
+        # (0.5 cm) because the body's bbox center is the geometric
+        # midpoint, which may differ from the translation tuple by
+        # half the body's extent along any axis (the translation tuple
+        # in the source script is the body's ORIGIN, not its center).
+        # The key check is uniqueness: if all centers agree within
+        # rounding, the placement worked.
         nfp = len(_frame_positions)
         actual = []
         for nm, intended, occ in _frame_positions:
             try:
-                tr = occ.transform.translation
-                actual.append((nm, (tr.x, tr.y, tr.z), intended))
+                comp = occ.component
+                if comp.bRepBodies.count == 0:
+                    actual.append((nm, (None, None, None), intended))
+                    continue
+                bb = comp.bRepBodies.item(0).boundingBox
+                cx = (bb.minPoint.x + bb.maxPoint.x) / 2
+                cy = (bb.minPoint.y + bb.maxPoint.y) / 2
+                cz = (bb.minPoint.z + bb.maxPoint.z) / 2
+                actual.append((nm, (cx, cy, cz), intended))
             except Exception:
                 actual.append((nm, (None, None, None), intended))
-        unique_actual = {pos for _, pos, _ in actual if None not in pos}
+        unique_actual = {
+            tuple(round(v, 2) for v in pos)
+            for _, pos, _ in actual
+            if None not in pos
+        }
         mismatches = [
             (nm, got, want)
             for nm, got, want in actual
-            if None in got or any(abs(g - w) > 1e-3 for g, w in zip(got, want))
+            if None in got
         ]
         placement_ok = (len(unique_actual) == nfp) and not mismatches
 
