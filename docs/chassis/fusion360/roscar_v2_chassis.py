@@ -127,8 +127,19 @@ import os
 #                       remain distinguishable from the aluminum rails.
 #                       Physical-color matching can be done via Fusion
 #                       appearance overrides for presentation renders.
+#   rev17   2026-04-17  Hide decorative stub extrusions in corner bracket
+#                       STEP imports. The GrabCAD bracket assembly includes
+#                       2 short pieces of 3030 profile per bracket that were
+#                       physically overlapping with the real posts and rails
+#                       at each corner — making the structural extrusions
+#                       look 'absent' in visual inspection. New helper
+#                       _hide_bracket_stubs() walks the imported component
+#                       tree and toggles isLightBulbOn=False on any sub-
+#                       occurrence whose name contains 'profile', 'extrusion',
+#                       or 't-slot'. Grub screws and the bracket body stay
+#                       visible.
 # =============================================================================
-VERSION = 'rev16'
+VERSION = 'rev17'
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Dimensions (cm) — multiply mm by 0.1
@@ -488,12 +499,43 @@ def _import_rail(rc, name, scale_factor, c0, c1, c2, t):
     return occ
 
 
-def _import_bracket(rc, step_path, name, c0, c1, c2, t, color='corner'):
-    """Import a bracket STEP and position it. No scaling — brackets are fixed size."""
+def _import_bracket(rc, step_path, name, c0, c1, c2, t, color='corner',
+                    hide_stubs=True):
+    """Import a bracket STEP and position it. No scaling — brackets are fixed size.
+
+    The 3-way corner bracket STEP assembly from GrabCAD includes decorative
+    'stub extrusions' (100mm pieces of 3030 profile showing how the bracket
+    connects to rails). Those stubs physically overlap with our actual posts
+    and rails in the assembled model, making the real frame hard to see.
+    hide_stubs=True toggles off the visibility of any sub-occurrence whose
+    component name mentions 'profile' or 'extrusion' (case-insensitive).
+    Grub screws stay visible so the bracket still looks like a real bracket.
+    """
     occ = _import_step(rc, step_path, name)
     _clr_occ(occ, color)
     _place_occ(occ, c0, c1, c2, t)
+    if hide_stubs:
+        _hide_bracket_stubs(occ.component)
     return occ
+
+
+def _hide_bracket_stubs(comp):
+    """Turn off visibility of any sub-occurrence that looks like a stub
+    extrusion (imported by some bracket STEPs as a decorative body).
+
+    Matches on component name containing 'profile' or 'extrusion'. Applies
+    recursively to handle arbitrary assembly nesting.
+    """
+    try:
+        for i in range(comp.occurrences.count):
+            child = comp.occurrences.item(i)
+            name = (child.component.name or '').lower()
+            if 'profile' in name or 'extrusion' in name or 't-slot' in name:
+                child.isLightBulbOn = False
+            else:
+                _hide_bracket_stubs(child.component)
+    except Exception:
+        pass
 
 
 def _frame(rc):
