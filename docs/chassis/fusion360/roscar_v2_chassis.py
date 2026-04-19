@@ -501,7 +501,24 @@ import os
 #                           complaint is about a specific visual
 #                           asymmetry in the STEP geometry.
 # =============================================================================
-VERSION = 'rev36'
+#   rev37   2026-04-19  Diagnostic-only rev. rev36 fixed the
+#                       chassis-floating issue (motor bracket now
+#                       has a vertical riser + rail flange that
+#                       spans motor→rail Z gap and the chassis
+#                       is structurally connected to the wheel
+#                       assemblies) — visually confirmed in the
+#                       rev36 render. But the corner brackets
+#                       still look off: sanity reports 7.3cm
+#                       offset from junctions, body_center at
+#                       (2.75, 7.76, 8.0) instead of ~(1.5, 1.5,
+#                       11.44). Adds a _log_bracket_bodies()
+#                       diagnostic that dumps every body's dims,
+#                       center, visibility, and name to stdout
+#                       for the first bracket (CB_Lo_FL). Next rev
+#                       will use that data to pick a better
+#                       stub-hide threshold and/or placement.
+# =============================================================================
+VERSION = 'rev37'
 
 # Chassis volume (cm) for _hide_stray_bodies. Anything whose body's
 # bounding-box center falls outside this box gets hidden.
@@ -1453,8 +1470,45 @@ def _draw_corner_bracket(rc, name, cx, cy, cz, dx_sign, dy_sign,
     _frame_positions.append((name, (cx, cy, cz), None))
 
 
+def _log_bracket_bodies(comp, bracket_name):
+    """Diagnostic (rev37): enumerate every body inside a bracket component
+    tree, log dims + visibility + name to stdout. Helps understand what
+    the GrabCAD STEP actually contains so we can decide placement and
+    stub-hiding strategy instead of guessing.
+    """
+    idx = [0]
+    def _walk(c, depth=0):
+        for i in range(c.bRepBodies.count):
+            b = c.bRepBodies.item(i)
+            try:
+                bb = b.boundingBox
+                dx = bb.maxPoint.x - bb.minPoint.x
+                dy = bb.maxPoint.y - bb.minPoint.y
+                dz = bb.maxPoint.z - bb.minPoint.z
+                cx = (bb.minPoint.x + bb.maxPoint.x) / 2
+                cy = (bb.minPoint.y + bb.maxPoint.y) / 2
+                cz = (bb.minPoint.z + bb.maxPoint.z) / 2
+                vis = b.isLightBulbOn
+                bname = b.name
+                print(f'  [{bracket_name}] body[{idx[0]}] depth={depth} '
+                      f'dims=({dx:.2f},{dy:.2f},{dz:.2f}) '
+                      f'center=({cx:.2f},{cy:.2f},{cz:.2f}) '
+                      f'vis={vis} name={bname}')
+                idx[0] += 1
+            except Exception as e:
+                print(f'  [{bracket_name}] body[{idx[0]}] error: {e}')
+                idx[0] += 1
+        for i in range(c.occurrences.count):
+            sub = c.occurrences.item(i)
+            try:
+                _walk(sub.component, depth + 1)
+            except Exception as e:
+                print(f'  [{bracket_name}] sub-occ error: {e}')
+    _walk(comp)
+
+
 def _import_bracket(rc, step_path, name, c0, c1, c2, t, color='corner',
-                    hide_stubs=True):
+                    hide_stubs=True, log_bodies=False):
     """Import a bracket STEP and position it. No scaling — brackets are fixed size.
 
     The 3-way corner bracket STEP assembly from GrabCAD includes decorative
@@ -1471,6 +1525,8 @@ def _import_bracket(rc, step_path, name, c0, c1, c2, t, color='corner',
     _frame_positions.append((name, t, occ))
     if hide_stubs:
         _hide_bracket_stubs(occ.component)
+    if log_bodies:
+        _log_bracket_bodies(occ.component, name)
     return occ
 
 
@@ -1589,7 +1645,9 @@ def _frame(rc):
     pax = hs           # post axis in front (X=hs=1.5) or rear (X=FRAME-hs=23.3)
     pay = hs           # post axis on left (Y=hs=1.5) or right (Y=FRAME-hs=23.3)
     # Lower deck brackets at the bottom of each post (z = LO + S)
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_FL', _X,  _Y,  _Z, (pax,         pay,         LO + S))
+    # rev37: log_bodies=True on the first one dumps its body tree so we
+    # can see what the GrabCAD STEP actually contains.
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_FL', _X,  _Y,  _Z, (pax,         pay,         LO + S), log_bodies=True)
     _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_FR', _NY, _X,  _Z, (pax,         FRAME - pay, LO + S))
     _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_RL', _Y,  _NX, _Z, (FRAME - pax, pay,         LO + S))
     _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_RR', _NX, _NY, _Z, (FRAME - pax, FRAME - pay, LO + S))
