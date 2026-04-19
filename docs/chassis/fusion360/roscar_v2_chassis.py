@@ -532,7 +532,17 @@ import os
 #                       outside the chassis volume and get hidden
 #                       by _hide_stray_bodies automatically.
 # =============================================================================
-VERSION = 'rev38'
+#   rev39   2026-04-19  Diagnostic rev: dump RPLIDAR_C1 body
+#                       tree so we can see where the BASE body is
+#                       (vs the scanner head, cable, connector,
+#                       etc.) and decide how to center the base
+#                       on the mast axis. User flagged that the
+#                       lidar is still visually off-center on its
+#                       mount plate despite the bbox center being
+#                       at mast axis — classic asymmetric STEP
+#                       geometry problem.
+# =============================================================================
+VERSION = 'rev39'
 
 # Chassis volume (cm) for _hide_stray_bodies. Anything whose body's
 # bounding-box center falls outside this box gets hidden.
@@ -1816,6 +1826,10 @@ def _components(rc, root=None):
             lid_occ = _import_step(root, STEP_RPLIDAR_C1, 'RPLIDAR_C1')
             _clr_occ(lid_occ, 'lidar')
             _place_occ(lid_occ, _X, _Y, _Z, (tx, ty, lz))
+            # rev39: dump the RPLIDAR body tree so we can see which
+            # body is the BASE (vs scanner head / cable / connector)
+            # and center the BASE on the mast axis, not the bbox.
+            _log_bracket_bodies(lid_occ.component, 'RPLIDAR_C1')
         except Exception as e:
             _clog.append(f'RPLIDAR STEP import failed: {e}')
             bh = LID_H * 0.35; hh = LID_H * 0.65
