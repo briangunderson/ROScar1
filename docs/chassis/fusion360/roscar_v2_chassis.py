@@ -542,7 +542,20 @@ import os
 #                       at mast axis — classic asymmetric STEP
 #                       geometry problem.
 # =============================================================================
-VERSION = 'rev39'
+#   rev40   2026-04-19  Lidar placement fix based on rev39 dump.
+#                       Rev39 showed the RPLIDAR STEP's body[18]
+#                       (5.56x5.56x2.05cm = LID_SZ²xbase height)
+#                       IS the base body, with local origin at
+#                       (0,0,0). Earlier rev34 '+2.05 XY offset'
+#                       was chasing body[0] — a tiny 0.48x0.48
+#                       protrusion at a different local position.
+#                       Now placing STEP origin directly at mast
+#                       axis puts the base body CENTER at the
+#                       mast axis. Sanity check updated to find
+#                       the base body by size (±5mm of LID_SZ)
+#                       rather than the first body it encounters.
+# =============================================================================
+VERSION = 'rev40'
 
 # Chassis volume (cm) for _hide_stray_bodies. Anything whose body's
 # bounding-box center falls outside this box gets hidden.
@@ -1133,24 +1146,38 @@ def _run_sanity_checks(rc):
     # its STEP origin that needs to be compensated for in placement.
     mast_x, mast_y = FRAME - S, FRAME / 2
     lidar_center = None
-    # Look for the STEP-imported RPLIDAR_C1 occurrence by component name,
-    # then walk its tree for the first visible body's bbox center.
+    # rev40: find the RPLIDAR_C1 occurrence, then find the LIDAR BASE
+    # body specifically (identified by size: ~5.5x5.5x2cm). Using the
+    # first body was a false positive — it was a small 4.8mm protrusion
+    # that happened to land at the right position for the wrong reason.
     for i in range(rc.occurrences.count):
         occ = rc.occurrences.item(i)
         try:
             if occ.component.name == 'RPLIDAR_C1':
-                def _first_body_center(comp):
-                    if comp.bRepBodies.count > 0:
-                        bb = comp.bRepBodies.item(0).boundingBox
-                        return ((bb.minPoint.x + bb.maxPoint.x)/2,
-                                (bb.minPoint.y + bb.maxPoint.y)/2,
-                                (bb.minPoint.z + bb.maxPoint.z)/2)
-                    for j in range(comp.occurrences.count):
-                        hit = _first_body_center(comp.occurrences.item(j).component)
+                def _find_base_body(comp):
+                    # Look for a body roughly LID_SZ x LID_SZ (±5mm) and
+                    # 1.5-3cm tall in Z — that's the lidar base.
+                    for j in range(comp.bRepBodies.count):
+                        b = comp.bRepBodies.item(j)
+                        try:
+                            bb = b.boundingBox
+                            dx = bb.maxPoint.x - bb.minPoint.x
+                            dy = bb.maxPoint.y - bb.minPoint.y
+                            dz = bb.maxPoint.z - bb.minPoint.z
+                            if (abs(dx - LID_SZ) < 0.5 and
+                                abs(dy - LID_SZ) < 0.5 and
+                                1.5 < dz < 3.0):
+                                return ((bb.minPoint.x + bb.maxPoint.x)/2,
+                                        (bb.minPoint.y + bb.maxPoint.y)/2,
+                                        (bb.minPoint.z + bb.maxPoint.z)/2)
+                        except Exception:
+                            pass
+                    for k in range(comp.occurrences.count):
+                        hit = _find_base_body(comp.occurrences.item(k).component)
                         if hit is not None:
                             return hit
                     return None
-                lidar_center = _first_body_center(occ.component)
+                lidar_center = _find_base_body(occ.component)
                 break
         except Exception:
             pass
@@ -1813,23 +1840,21 @@ def _components(rc, root=None):
     lz = mp_z + mp_t
     if os.path.exists(STEP_RPLIDAR_C1):
         # Real RPLIDAR C1 CAD from slamtec.com. Body is 55.6x55.6x41.3mm.
-        # rev34: The STEP's body_center sits at local (-2.05, -2.05, 0)
-        # from its origin, so passing (lcx - LID_SZ/2, lcy - LID_SZ/2)
-        # as the origin translation made the actual body_center land
-        # at world (16.97, 7.57) — almost 5 cm forward/left of the
-        # mast axis (21.8, 12.4). Compensate so the body CENTER (not
-        # origin) lands on the mast axis: target = (lcx, lcy) - offset.
-        LIDAR_LOCAL_CENTER_OFFSET = (-2.05, -2.05)
-        tx = lcx - LIDAR_LOCAL_CENTER_OFFSET[0]
-        ty = lcy - LIDAR_LOCAL_CENTER_OFFSET[1]
+        # rev40: The rev39 body-tree dump identified body[18] (5.56x5.56
+        # x2.05cm) as the LIDAR BASE. Its center is at local (0, 0, 0)
+        # from the STEP origin. So to center the base on the mast axis,
+        # we just place the STEP origin AT (lcx, lcy) — no compensation
+        # needed. Previous rev34's '+2.05' offset was targeting body[0]
+        # (a tiny 4.8mm protrusion with a different local position).
+        # The sanity-check 'lidar_on_mast_axis' was a false positive
+        # because it read body[0]'s center, which happened to be at
+        # mast axis after the wrong-offset placement.
+        tx = lcx
+        ty = lcy
         try:
             lid_occ = _import_step(root, STEP_RPLIDAR_C1, 'RPLIDAR_C1')
             _clr_occ(lid_occ, 'lidar')
             _place_occ(lid_occ, _X, _Y, _Z, (tx, ty, lz))
-            # rev39: dump the RPLIDAR body tree so we can see which
-            # body is the BASE (vs scanner head / cable / connector)
-            # and center the BASE on the mast axis, not the bbox.
-            _log_bracket_bodies(lid_occ.component, 'RPLIDAR_C1')
         except Exception as e:
             _clog.append(f'RPLIDAR STEP import failed: {e}')
             bh = LID_H * 0.35; hh = LID_H * 0.65
