@@ -555,7 +555,23 @@ import os
 #                       the base body by size (±5mm of LID_SZ)
 #                       rather than the first body it encounters.
 # =============================================================================
-VERSION = 'rev40'
+#   rev41   2026-04-19  Fresh approach: stop fighting the GrabCAD
+#                       3-way corner bracket STEP. Replace all 8
+#                       corner bracket imports with a simple
+#                       procedural 2-flange L-bracket drawn
+#                       directly at each outer corner.
+#                       Each bracket is 2 thin plates (3mm PETG)
+#                       hugging the outer -X and -Y faces of the
+#                       corner, spanning the full rail height.
+#                       Visually CORRECT by construction — no
+#                       body-offset math, no rotation tricks, no
+#                       stub hiding. Three lines of code per
+#                       bracket.
+#                       Rails, posts, mast remain STEP imports
+#                       (they work and the T-slot profile is
+#                       valuable visually).
+# =============================================================================
+VERSION = 'rev41'
 
 # Chassis volume (cm) for _hide_stray_bodies. Anything whose body's
 # bounding-box center falls outside this box gets hidden.
@@ -1521,6 +1537,64 @@ def _draw_corner_bracket(rc, name, cx, cy, cz, dx_sign, dy_sign,
     _frame_positions.append((name, (cx, cy, cz), None))
 
 
+def _draw_l_corner(rc, name, cx, cy, cz, sx, sy,
+                   flange_len=3.0, flange_thickness=0.3, flange_height=None):
+    """Simple procedural corner bracket (rev41).
+
+    Draws 2 thin flat flanges meeting at the OUTER corner (cx, cy, cz):
+      - Flange A hugs the outer X face of the frame (perpendicular to X)
+      - Flange B hugs the outer Y face of the frame (perpendicular to Y)
+
+    sx, sy: +1 or -1. Which outer face (-X or +X) and (-Y or +Y) we're
+            hugging. FL corner at (0, 0) has outer faces on -X and -Y,
+            so bracket material extends toward -X and -Y from the
+            corner. Use sx=+1, sy=+1 (interior is +X, +Y).
+
+    cz: Z of the rail bottom at this corner (LO for lower, HI for upper).
+        Flange spans flange_height in Z from cz upward.
+
+    flange_len: length of each flange along the adjacent rail (default
+                3cm = one extrusion width, typical 3030 hardware).
+    flange_thickness: Y thickness for the X-flange / X thickness for
+                     the Y-flange (3mm PETG).
+    flange_height: Z extent. Default = S (one rail height, 3cm).
+
+    Saves position to _frame_positions for the sanity check.
+    """
+    if flange_height is None:
+        flange_height = S
+    T = flange_thickness
+    # Flange A: perpendicular to X — hugs the outer X face.
+    # Its X thickness = T (bracket wall). Extends along Y into the
+    # chassis by flange_len in the sy direction, and up in Z by
+    # flange_height.
+    if sx > 0:                      # outer face at X=cx, interior is +X
+        ax_x = cx - T
+    else:                           # outer face at X=cx, interior is -X
+        ax_x = cx
+    if sy > 0:
+        ax_y = cy
+    else:
+        ax_y = cy - flange_len
+    B(rc, f'{name}_X', ax_x, ax_y, cz, T, flange_len, flange_height,
+      'corner')
+
+    # Flange B: perpendicular to Y — hugs the outer Y face.
+    if sy > 0:
+        by_y = cy - T
+    else:
+        by_y = cy
+    if sx > 0:
+        by_x = cx
+    else:
+        by_x = cx - flange_len
+    B(rc, f'{name}_Y', by_x, by_y, cz, flange_len, T, flange_height,
+      'corner')
+
+    # Record for sanity check (treat the corner as the "junction").
+    _frame_positions.append((name, (cx, cy, cz + flange_height / 2), None))
+
+
 def _log_bracket_bodies(comp, bracket_name):
     """Diagnostic (rev37): enumerate every body inside a bracket component
     tree, log dims + visibility + name to stdout. Helps understand what
@@ -1693,49 +1767,27 @@ def _frame(rc):
     # _hide_bracket_stubs still removes the 100mm decorative stubs the
     # GrabCAD bracket STEP carries.
     # --------------------------------------------------------------------
-    # rev38: the GrabCAD bracket STEP's main body has local offset
-    # (1.25, 6.26, -3.44) from origin (discovered via rev37 diagnostic).
-    # To put the MAIN body at each post-rail junction, place the STEP
-    # origin at (junction - rotated(local_offset)).
-    BKT_LOCAL = (1.25, 6.26, -3.44)
-
-    def _bkt_place(col0, col1, col2, junction):
-        """Return placement tuple so that the bracket's main body
-        bbox-center ends up at junction."""
-        # Rotate BKT_LOCAL by the column vectors (columns tell where
-        # local +X, +Y, +Z end up in world coords)
-        wx = col0[0]*BKT_LOCAL[0] + col1[0]*BKT_LOCAL[1] + col2[0]*BKT_LOCAL[2]
-        wy = col0[1]*BKT_LOCAL[0] + col1[1]*BKT_LOCAL[1] + col2[1]*BKT_LOCAL[2]
-        wz = col0[2]*BKT_LOCAL[0] + col1[2]*BKT_LOCAL[1] + col2[2]*BKT_LOCAL[2]
-        return (junction[0] - wx, junction[1] - wy, junction[2] - wz)
-
-    # Post-axis junctions (where post meets its two rails)
-    jnc = {
-        'FL': (hs,         hs,         LO + S),
-        'FR': (hs,         FRAME - hs, LO + S),
-        'RL': (FRAME - hs, hs,         LO + S),
-        'RR': (FRAME - hs, FRAME - hs, LO + S),
-    }
-    jnc_hi = {k: (x, y, HI) for k, (x, y, _) in jnc.items()}
-
-    # Lower deck brackets
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_FL', _X,  _Y,  _Z,
-                    _bkt_place(_X, _Y, _Z, jnc['FL']), log_bodies=True)
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_FR', _NY, _X,  _Z,
-                    _bkt_place(_NY, _X, _Z, jnc['FR']))
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_RL', _Y,  _NX, _Z,
-                    _bkt_place(_Y, _NX, _Z, jnc['RL']))
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_RR', _NX, _NY, _Z,
-                    _bkt_place(_NX, _NY, _Z, jnc['RR']))
-    # Upper deck brackets
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_FL', _X,  _Y,  _Z,
-                    _bkt_place(_X, _Y, _Z, jnc_hi['FL']))
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_FR', _NY, _X,  _Z,
-                    _bkt_place(_NY, _X, _Z, jnc_hi['FR']))
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_RL', _Y,  _NX, _Z,
-                    _bkt_place(_Y, _NX, _Z, jnc_hi['RL']))
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_RR', _NX, _NY, _Z,
-                    _bkt_place(_NX, _NY, _Z, jnc_hi['RR']))
+    # --------------------------------------------------------------------
+    # Corner brackets (rev41): procedural L-bracket hugging each outer
+    # corner of the frame. Fresh approach after the GrabCAD STEP proved
+    # a geometry mismatch with our cut plan (its 3-way cube needs 3
+    # extrusion ENDS to meet; our FR rails run continuously through).
+    # Each bracket is 2 flat flanges meeting at the outer corner:
+    #   - one on the -X (or +X) outer face
+    #   - one on the -Y (or +Y) outer face
+    # Flange size 30x30mm x 3mm PETG (easy to 3D print, ~$0 to fab).
+    # --------------------------------------------------------------------
+    for nm, cx, cy, cz, sx, sy in [
+        ('CB_Lo_FL', 0,     0,     LO, +1, +1),
+        ('CB_Lo_FR', 0,     FRAME, LO, +1, -1),
+        ('CB_Lo_RL', FRAME, 0,     LO, -1, +1),
+        ('CB_Lo_RR', FRAME, FRAME, LO, -1, -1),
+        ('CB_Hi_FL', 0,     0,     HI, +1, +1),
+        ('CB_Hi_FR', 0,     FRAME, HI, +1, -1),
+        ('CB_Hi_RL', FRAME, 0,     HI, -1, +1),
+        ('CB_Hi_RR', FRAME, FRAME, HI, -1, -1),
+    ]:
+        _draw_l_corner(rc, nm, cx, cy, cz, sx, sy)
 
     # --------------------------------------------------------------------
     # T-plate bracket for lidar mast attachment to rear upper rail.
