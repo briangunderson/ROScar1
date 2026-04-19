@@ -467,7 +467,41 @@ import os
 #                       or the stored intended position for
 #                       procedural entries.
 # =============================================================================
-VERSION = 'rev35'
+#   rev36   2026-04-19  User caught more issues still wrong:
+#                       'the corner brackets need to be the ones
+#                       in the step files'; 'the entire chassis
+#                       is just floating in mid-air, disconnected
+#                       from the motors/brackets'; 'lidar still
+#                       not centered on its base plate'.
+#
+#                       Fixes:
+#                       (1) Corner brackets: restored the GrabCAD
+#                           STEP import (rev34's procedural boxes
+#                           reverted). Placement shifted from the
+#                           outer chassis corner (0, 0, LO+S) to
+#                           the POST AXIS (1.5, 1.5, LO+S) so the
+#                           bracket's body-mass lands inside the
+#                           post+rail junction instead of 5cm
+#                           into the chassis interior.
+#                       (2) Motor bracket: added a VERTICAL RISER
+#                           piece that spans from the bottom of
+#                           the bracket (at motor level ~Z=2.3cm)
+#                           up to the chassis rail top (Z=LO+S=
+#                           11.44cm), plus a rail-face flange at
+#                           the rail. Without this the motor
+#                           bracket ended at motor level and the
+#                           chassis was visibly floating ~6cm
+#                           above the wheels/motors. M5 bolts now
+#                           go through the rail flange into the
+#                           rail T-slot at mid-height.
+#                       (3) Lidar centering: left as-is in rev36
+#                           (sanity check reports 0.00cm offset
+#                           from mast axis), observing again
+#                           after rev36 renders to see if user's
+#                           complaint is about a specific visual
+#                           asymmetry in the STEP geometry.
+# =============================================================================
+VERSION = 'rev36'
 
 # Chassis volume (cm) for _hide_stray_bodies. Anything whose body's
 # bounding-box center falls outside this box gets hidden.
@@ -1541,24 +1575,29 @@ def _frame(rc):
     _import_rail(rc, 'Mast', mast_scale, _X, _Z, _NY, (FRAME - S, FRAME / 2, MST))
 
     # --------------------------------------------------------------------
-    # Corner brackets (rev34): procedural 2-flange brackets hugging the
-    # outer -X and -Y faces of each corner junction. Replaces the
-    # GrabCAD STEP import, whose body was at local (1.25, 6.26, -3.44)
-    # — placing it 5-6cm inside the chassis interior instead of AT
-    # the rail-post corner. These simple box pairs are easy to 3D-print
-    # as single PETG parts (user has no press brake).
+    # Corner brackets (rev36): back to STEP imports from GrabCAD. The
+    # rev28 diagnostic showed the bracket body is centered at local
+    # (1.25, 6.26, -3.44), so placing it at the outer chassis corner
+    # (0, 0, LO+S) put the body 6cm into the interior. Instead, place
+    # at each POST AXIS junction (post_x_center, post_y_center, LO+S)
+    # so the bracket body lands near the post center, physically
+    # inside the post+rail junction.
+    #
+    # _hide_bracket_stubs still removes the 100mm decorative stubs the
+    # GrabCAD bracket STEP carries.
     # --------------------------------------------------------------------
-    for nm, cx, cy, cz, dx_sign, dy_sign in [
-        ('CB_Lo_FL', 0,     0,     LO + S, +1, +1),
-        ('CB_Lo_FR', 0,     FRAME, LO + S, +1, -1),
-        ('CB_Lo_RL', FRAME, 0,     LO + S, -1, +1),
-        ('CB_Lo_RR', FRAME, FRAME, LO + S, -1, -1),
-        ('CB_Hi_FL', 0,     0,     HI,     +1, +1),
-        ('CB_Hi_FR', 0,     FRAME, HI,     +1, -1),
-        ('CB_Hi_RL', FRAME, 0,     HI,     -1, +1),
-        ('CB_Hi_RR', FRAME, FRAME, HI,     -1, -1),
-    ]:
-        _draw_corner_bracket(rc, nm, cx, cy, cz, dx_sign, dy_sign)
+    pax = hs           # post axis in front (X=hs=1.5) or rear (X=FRAME-hs=23.3)
+    pay = hs           # post axis on left (Y=hs=1.5) or right (Y=FRAME-hs=23.3)
+    # Lower deck brackets at the bottom of each post (z = LO + S)
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_FL', _X,  _Y,  _Z, (pax,         pay,         LO + S))
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_FR', _NY, _X,  _Z, (pax,         FRAME - pay, LO + S))
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_RL', _Y,  _NX, _Z, (FRAME - pax, pay,         LO + S))
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_RR', _NX, _NY, _Z, (FRAME - pax, FRAME - pay, LO + S))
+    # Upper deck brackets at the top of each post (z = HI)
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_FL', _X,  _Y,  _Z, (pax,         pay,         HI))
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_FR', _NY, _X,  _Z, (pax,         FRAME - pay, HI))
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_RL', _Y,  _NX, _Z, (FRAME - pax, pay,         HI))
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_RR', _NX, _NY, _Z, (FRAME - pax, FRAME - pay, HI))
 
     # --------------------------------------------------------------------
     # T-plate bracket for lidar mast attachment to rear upper rail.
@@ -1885,9 +1924,10 @@ def _motor_assy(rc, tag, mx, fy, od):
           mx - 0.15, bolt_y_start,
           AXL + dz - 0.15, 0.3, bolt_total_len, 0.3, 'bracket')
 
-    # ---- plate_h: rail arm, spans motor face → rail face ----
-    # Arm sits JUST BELOW the motor assembly. Narrow in X so it doesn't
-    # collide with the motor can body.
+    # ---- plate_h: bottom arm, spans motor face → rail face ----
+    # Arm sits JUST BELOW the motor assembly, connecting the motor
+    # flange to the foot of the vertical RISER. Narrow in X so it
+    # doesn't collide with the motor can body.
     arm_x_w = S * 2/3
     arm_z0  = AXL - M_DIA/2 - BRK - 0.05          # 0.5mm clearance below motor
     if od < 0:
@@ -1895,24 +1935,51 @@ def _motor_assy(rc, tag, mx, fy, od):
     else:
         arm_y0, arm_y1 = fy, gbox_face_y
     arm_len = arm_y1 - arm_y0
-    B(rc, f'Brk_{tag}_RailArm',
+    B(rc, f'Brk_{tag}_BottomArm',
       mx - arm_x_w/2, arm_y0, arm_z0,
       arm_x_w, arm_len, BRK, 'bracket')
 
-    # 2 M5 bolts through the arm into the rail T-slot, clustered near
-    # the rail end of the arm.
-    rail_bolt_y0 = (fy - 0.6) if od < 0 else (fy + 0.2)
-    for bx_off in (-0.4, 0.4):
-        CZ(rc, f'Brk_{tag}_M5_{int(bx_off*10):+d}',
-           mx + bx_off, rail_bolt_y0 + (0.5 if od>0 else 0.5),
-           arm_z0 - 0.1, 0.22, BRK + 0.3, 'bracket')
+    # ---- plate_riser: rev36. VERTICAL piece spanning from the bottom
+    # arm UP to the chassis rail. Without this, the bracket ended at
+    # motor level Z=~2.3cm while the chassis rail starts at Z=LO=8.44cm
+    # — the chassis was visually floating above the wheels. The riser
+    # is at the rail-face end of the bottom arm, on the outer face of
+    # the chassis rail (so bolts can go through it into the rail's
+    # T-slot).
+    if od < 0:
+        riser_y0 = fy - BRK                       # on outer -Y face of left/right rail
+    else:
+        riser_y0 = fy
+    riser_z0 = arm_z0 + BRK                       # top of bottom arm
+    riser_z1 = LO + S                             # top of lower rail
+    riser_sz = riser_z1 - riser_z0
+    B(rc, f'Brk_{tag}_Riser',
+      mx - arm_x_w/2, riser_y0, riser_z0,
+      arm_x_w, BRK, riser_sz, 'bracket')
 
-    # ---- plate_g: gusset rib in the L's inside corner ----
+    # ---- plate_rf: rail-face flange. Covers the top of the riser
+    # where it mates with the rail face; this is where the M5 bolts
+    # go through into the T-slot.
+    rf_h = S                                      # full rail height in Z
+    rf_w = arm_x_w                                # same X width as arm
+    rf_y0 = riser_y0
+    rf_z0 = LO                                    # aligned with bottom of rail
+    B(rc, f'Brk_{tag}_RailFlange',
+      mx - rf_w/2, rf_y0, rf_z0,
+      rf_w, BRK, rf_h, 'bracket')
+
+    # 2 M5 bolts through the rail flange into the rail T-slot at
+    # mid-height of the rail.
+    rail_bolt_y_thread = fy + 0.05 if od < 0 else fy - 0.05
+    rail_bolt_z = LO + S / 2
+    for bx_off in (-0.4, 0.4):
+        B(rc, f'Brk_{tag}_M5_{int(bx_off*10):+d}',
+          mx + bx_off - 0.15, rf_y0 - 0.2 if od<0 else rf_y0 + BRK,
+          rail_bolt_z - 0.15, 0.3, BRK + 0.3, 0.3, 'bracket')
+
+    # ---- plate_g: gusset rib bridging motor flange and riser ----
     gusset_t = 0.3                                 # 3mm thin rib
     gusset_h = min(PV_H * 0.6, 2.4)                # ~24mm along Z
-    # Corner of the L is at Y=gbox_face_y (for od<0; plate_v's inner face
-    # is at +BRK), sitting on top of arm at Z=arm_z0+BRK. Gusset extends
-    # DOWN from the plate and BACK toward the rail.
     if od < 0:
         g_y0 = gbox_face_y
         g_len = min(arm_len * 0.5, 2.5)
