@@ -518,7 +518,21 @@ import os
 #                       will use that data to pick a better
 #                       stub-hide threshold and/or placement.
 # =============================================================================
-VERSION = 'rev37'
+#   rev38   2026-04-19  Corner bracket placement fix using the
+#                       rev37 diagnostic. The main bracket body
+#                       (5.5x5.5x3.1cm) sits at local offset
+#                       (1.25, 6.26, -3.44) from the STEP origin,
+#                       so placing origin AT the junction put the
+#                       body 6cm inside the chassis. Fix: the new
+#                       _bkt_place() helper computes placement =
+#                       junction - rotated(BKT_LOCAL) so the main
+#                       body ends up centered on the junction.
+#                       Other sub-bodies (grub screws at world
+#                       X=45.76, stubs at world Y=-29) end up WAY
+#                       outside the chassis volume and get hidden
+#                       by _hide_stray_bodies automatically.
+# =============================================================================
+VERSION = 'rev38'
 
 # Chassis volume (cm) for _hide_stray_bodies. Anything whose body's
 # bounding-box center falls outside this box gets hidden.
@@ -1642,20 +1656,49 @@ def _frame(rc):
     # _hide_bracket_stubs still removes the 100mm decorative stubs the
     # GrabCAD bracket STEP carries.
     # --------------------------------------------------------------------
-    pax = hs           # post axis in front (X=hs=1.5) or rear (X=FRAME-hs=23.3)
-    pay = hs           # post axis on left (Y=hs=1.5) or right (Y=FRAME-hs=23.3)
-    # Lower deck brackets at the bottom of each post (z = LO + S)
-    # rev37: log_bodies=True on the first one dumps its body tree so we
-    # can see what the GrabCAD STEP actually contains.
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_FL', _X,  _Y,  _Z, (pax,         pay,         LO + S), log_bodies=True)
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_FR', _NY, _X,  _Z, (pax,         FRAME - pay, LO + S))
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_RL', _Y,  _NX, _Z, (FRAME - pax, pay,         LO + S))
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_RR', _NX, _NY, _Z, (FRAME - pax, FRAME - pay, LO + S))
-    # Upper deck brackets at the top of each post (z = HI)
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_FL', _X,  _Y,  _Z, (pax,         pay,         HI))
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_FR', _NY, _X,  _Z, (pax,         FRAME - pay, HI))
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_RL', _Y,  _NX, _Z, (FRAME - pax, pay,         HI))
-    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_RR', _NX, _NY, _Z, (FRAME - pax, FRAME - pay, HI))
+    # rev38: the GrabCAD bracket STEP's main body has local offset
+    # (1.25, 6.26, -3.44) from origin (discovered via rev37 diagnostic).
+    # To put the MAIN body at each post-rail junction, place the STEP
+    # origin at (junction - rotated(local_offset)).
+    BKT_LOCAL = (1.25, 6.26, -3.44)
+
+    def _bkt_place(col0, col1, col2, junction):
+        """Return placement tuple so that the bracket's main body
+        bbox-center ends up at junction."""
+        # Rotate BKT_LOCAL by the column vectors (columns tell where
+        # local +X, +Y, +Z end up in world coords)
+        wx = col0[0]*BKT_LOCAL[0] + col1[0]*BKT_LOCAL[1] + col2[0]*BKT_LOCAL[2]
+        wy = col0[1]*BKT_LOCAL[0] + col1[1]*BKT_LOCAL[1] + col2[1]*BKT_LOCAL[2]
+        wz = col0[2]*BKT_LOCAL[0] + col1[2]*BKT_LOCAL[1] + col2[2]*BKT_LOCAL[2]
+        return (junction[0] - wx, junction[1] - wy, junction[2] - wz)
+
+    # Post-axis junctions (where post meets its two rails)
+    jnc = {
+        'FL': (hs,         hs,         LO + S),
+        'FR': (hs,         FRAME - hs, LO + S),
+        'RL': (FRAME - hs, hs,         LO + S),
+        'RR': (FRAME - hs, FRAME - hs, LO + S),
+    }
+    jnc_hi = {k: (x, y, HI) for k, (x, y, _) in jnc.items()}
+
+    # Lower deck brackets
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_FL', _X,  _Y,  _Z,
+                    _bkt_place(_X, _Y, _Z, jnc['FL']), log_bodies=True)
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_FR', _NY, _X,  _Z,
+                    _bkt_place(_NY, _X, _Z, jnc['FR']))
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_RL', _Y,  _NX, _Z,
+                    _bkt_place(_Y, _NX, _Z, jnc['RL']))
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Lo_RR', _NX, _NY, _Z,
+                    _bkt_place(_NX, _NY, _Z, jnc['RR']))
+    # Upper deck brackets
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_FL', _X,  _Y,  _Z,
+                    _bkt_place(_X, _Y, _Z, jnc_hi['FL']))
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_FR', _NY, _X,  _Z,
+                    _bkt_place(_NY, _X, _Z, jnc_hi['FR']))
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_RL', _Y,  _NX, _Z,
+                    _bkt_place(_Y, _NX, _Z, jnc_hi['RL']))
+    _import_bracket(rc, STEP_CORNER_BRACKET, 'CB_Hi_RR', _NX, _NY, _Z,
+                    _bkt_place(_NX, _NY, _Z, jnc_hi['RR']))
 
     # --------------------------------------------------------------------
     # T-plate bracket for lidar mast attachment to rear upper rail.
