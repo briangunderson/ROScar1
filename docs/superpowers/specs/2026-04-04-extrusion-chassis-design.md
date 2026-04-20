@@ -138,20 +138,28 @@ Motor mounting configuration (from the Fusion 360 script, matching the physical 
   - Motor hangs BELOW the lower deck rails, with its body extending OUTBOARD from each frame face
   - L-bracket clamps the motor body to the outer face of the lower deck rail via T-nuts
 
-Motor offset per side from frame face to wheel center (**M_OFF**):
-  - Motor can body: 38mm
-  - Gearbox: 24mm
-  - Shaft protrusion: 13mm
-  - Half wheel width: 18.65mm
-  - **Total M_OFF ≈ 93.6mm**
+Motor offset per side from frame face to wheel center (**M_OFF**)
+— updated for the real 25GA20E260 (Ø25 can + Ø21 gearbox + Ø7
+shaft hub + Ø3 thin shaft, 61.5mm total):
+  - Motor can (Ø25 × 19.5mm)
+  - Gearbox (Ø21 × 19.5mm)
+  - Shaft hub (Ø7 × 11.5mm — wheel mounts here)
+  - Half of thin shaft (5.5mm) — wheel center is at hub midpoint + ½ shaft
+  - **Total M_OFF ≈ 56mm**
 
 Resulting chassis footprint:
-- **Track width: ~435mm** (= 248mm frame + 2 × 93.6mm) vs. current 205mm → **+112% wider**
+- **Track width: ~360mm** (= 248mm frame + 2 × 56mm) vs. current 205mm → **+76% wider**
 - **Wheelbase: ~200mm** (motors at ±100mm from frame center along X axis) vs. current 96.5mm → **+107% longer**
-- **Stability polygon area: ~87,000mm²** vs. current ~19,800mm² → **4.4× larger**
-- Outer-to-outer wheel span (including 37.3mm wheel width): ~472mm — fits through any standard doorway (≥711mm interior) with >100mm clearance per side.
+- **Stability polygon area: ~72,000mm²** vs. current ~19,800mm² → **3.6× larger**
+- Outer-to-outer wheel span (including 37.3mm wheel width): ~397mm — fits through any standard doorway (≥711mm interior) with >150mm clearance per side.
 
-Earlier drafts of this spec quoted ~320mm track width using M_OFF≈35mm. That number was incorrect — it omitted the 62mm motor body length from the offset calculation. The CAD model has always reflected the ~435mm reality. Corrected here after the 2026-04-17 CAD audit.
+Revision history of the M_OFF calculation: earlier drafts quoted
+~320mm (M_OFF≈35mm — omitted motor body entirely); rev13-rev41
+used 435mm (M_OFF=93.6mm — based on a generic 24×62mm motor
+placeholder); rev42 (2026-04-20) uses the real 25GA20E260 datasheet
+values, giving the 360mm figure. The chassis rails themselves are
+unchanged — cut sheet (`tasks/chassis-v2-cut-sheet.md`) is still
+valid at all dimension revisions.
 
 The motor L-bracket slides in the rail's T-slot, so small track/wheelbase fine-tuning is possible without reprinting brackets.
 

@@ -570,8 +570,23 @@ import os
 #                       Rails, posts, mast remain STEP imports
 #                       (they work and the T-slot profile is
 #                       valuable visually).
+#   rev42   2026-04-20  Real motor dimensions: 25GA20E260 (7.4V,
+#                       1:20 gearbox). Previous model assumed a
+#                       generic 24mm×62mm motor; the real part is
+#                       Ø25×19.5mm motor can + Ø21×19.5mm gearbox
+#                       + Ø7×11.5mm shaft hub + Ø3×11mm thin shaft.
+#                       Net effect: motor length 61.5mm (same as
+#                       before — the old 62mm estimate matched by
+#                       coincidence), but the INTERNAL split is
+#                       very different. Motor-mount face at Y=39mm
+#                       from rail (vs 62mm before), so the motor
+#                       bracket is much shorter. Added SHAFT_HUB
+#                       cylinder between gearbox and thin shaft.
+#                       M_OFF recalc: 5.60cm (was 9.37). Track
+#                       width 360mm (was 435mm). Rails unchanged
+#                       — cut sheet still valid.
 # =============================================================================
-VERSION = 'rev41'
+VERSION = 'rev42'
 
 # Chassis volume (cm) for _hide_stray_bodies. Anything whose body's
 # bounding-box center falls outside this box gets hidden.
@@ -603,15 +618,27 @@ SHOW_MSGBOX = True
 # ═══════════════════════════════════════════════════════════════════════════
 FRAME = 24.8;  S = 3.0;  POST_H = 10.0;  MAST_H = 12.0
 
-# Motor (hangs below frame on L-brackets)
-M_DIA = 2.4;  M_CAN = 3.8;  M_GBOX = 2.4  # can 38mm + gearbox 24mm = 62mm
-M_GBOX_DIA = 2.2  # gearbox slightly narrower
-SHAFT = 1.3;  SHAFT_D = 0.4
+# Motor: 25GA20E260 (7.4V, 1:20 gearbox, 67.4g). Real datasheet
+# dimensions, rev42 update from the earlier placeholder values.
+#   Motor can   Ø25mm × 19.5mm
+#   Gearbox     Ø21mm × 19.5mm  (shaft-end face has 2× M3 at 17mm spacing)
+#   Shaft hub   Ø7mm  × 11.5mm  (wheel mounts on this section)
+#   Thin shaft  Ø3mm  × 11mm
+#   Total axial length: 61.5mm
+M_DIA = 2.5;  M_CAN = 1.95;  M_GBOX = 1.95
+M_GBOX_DIA = 2.1
+SHAFT_HUB_DIA = 0.7;  SHAFT_HUB = 1.15   # Ø7mm × 11.5mm — wheel-mount section
+SHAFT = 1.1;  SHAFT_D = 0.3              # Ø3mm × 11mm thin drive shaft
 WHL_R = 3.97;  WHL_W = 3.73
-BRKT_T = 0.4  # bracket plate thickness
+BRKT_T = 0.4  # bracket plate thickness (4mm PETG)
 
-# Motor offset from frame face to wheel center
-M_OFF = M_CAN + M_GBOX + SHAFT + WHL_W/2  # ~9.37cm
+# Motor offset: rail face → wheel center. Wheel mounts on the Ø7 hub;
+# its center is at the hub midpoint + the thin shaft sticks through.
+# M_OFF = M_CAN + M_GBOX + SHAFT_HUB + SHAFT/2
+M_OFF = M_CAN + M_GBOX + SHAFT_HUB + SHAFT/2   # = 5.60 cm (was 9.37)
+# Track width is now FRAME + 2*M_OFF = 24.8 + 11.2 = 36.0 cm (360mm),
+# down from 435mm with the oversized placeholder motor. Rail lengths
+# unchanged; cut sheet still valid.
 
 # Lower deck: frame bottom above wheel tops
 GND = WHL_R * 2 + 0.5  # ~8.44cm
@@ -2055,8 +2082,21 @@ def _motor_assy(rc, tag, mx, fy, od):
         B(rc, f'MGbx_{tag}', mx-M_GBOX_DIA/2, gbox_start, AXL-M_GBOX_DIA/2,
           M_GBOX_DIA, M_GBOX, M_GBOX_DIA, 'gearbox')
 
-    # Shaft — thin silver cylinder reaching the wheel hub
-    shaft_start = (gbox_start + M_GBOX) if od > 0 else (gbox_start - SHAFT)
+    # Shaft hub — Ø7mm section between gearbox and thin shaft; this is
+    # what the mecanum wheel's hex adapter actually grips (rev42).
+    if od > 0:
+        hub_start = gbox_start + M_GBOX
+    else:
+        hub_start = gbox_start - SHAFT_HUB
+    try: CY(rc, f'MHub_{tag}', mx, hub_start, AXL,
+            SHAFT_HUB_DIA/2, SHAFT_HUB, 'hub')
+    except Exception: pass
+
+    # Thin shaft — Ø3mm protrudes past the hub to the thin-shaft end
+    if od > 0:
+        shaft_start = hub_start + SHAFT_HUB
+    else:
+        shaft_start = hub_start - SHAFT
     try: CY(rc, f'Shaft_{tag}', mx, shaft_start, AXL, SHAFT_D/2, SHAFT, 'hub')
     except Exception: pass
 
