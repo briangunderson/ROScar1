@@ -230,16 +230,26 @@ def run(context):
                            DART_THICKNESS, y_len, layer_h)
             dart_bodies.append(body)
 
-        print(f'STEP 6: combine {1 + 1 + len(dart_bodies)} bodies into one')
-        all_bodies = [mtr, rail] + dart_bodies
-        combined = _combine_to_single(rc, all_bodies, 'MotorBracket')
+        # STEP 6: extend the top dart layer to overlap the rail flange
+        # so the combine boolean has something to union with. Without
+        # this, the staircase's top edge at y=7.8 never touches the
+        # rail flange at y=7.9 and combineFeatures.add() returns None.
+        print('STEP 6: bridge dart→rail with a connector block')
+        bridge_body = _box_xy(
+            rc, 'DartRailBridge',
+            -DART_THICKNESS / 2, PV_D, RF_Z_BOTTOM,
+            DART_THICKNESS, (rf_y0 + RF_D) - PV_D, BRK)
+        all_bodies = [mtr, rail] + dart_bodies + [bridge_body]
 
-        print('STEP 7: export STL')
+        print(f'STEP 7: export multi-body STL ({len(all_bodies)} bodies)')
+        # Export the whole root component — multi-body STL; slicers
+        # treat touching bodies as a single printable unit. No combine
+        # needed.
         out_dir = os.path.dirname(STL_OUT)
         if out_dir and not os.path.exists(out_dir):
             os.makedirs(out_dir, exist_ok=True)
         exp = des.exportManager
-        stl_opts = exp.createSTLExportOptions(combined, STL_OUT)
+        stl_opts = exp.createSTLExportOptions(rc, STL_OUT)
         stl_opts.meshRefinement = (
             adsk.fusion.MeshRefinementSettings.MeshRefinementHigh)
         stl_opts.isBinaryFormat = True
