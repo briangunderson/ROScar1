@@ -28,6 +28,10 @@ def generate_launch_description():
         'use_camera', default_value='true',
         description='Launch the webcam (v4l2_camera) node',
     )
+    use_depth_arg = DeclareLaunchArgument(
+        'use_depth', default_value='false',
+        description='Launch the Intel RealSense D435i depth camera',
+    )
 
     # -- URDF (robot_state_publisher + joint_state_publisher) --
     description_launch = IncludeLaunchDescription(
@@ -72,6 +76,14 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('use_camera')),
     )
 
+    # -- Intel RealSense D435i depth camera --
+    depth_camera_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(bringup_dir, 'launch', 'depth_camera.launch.py')
+        ),
+        condition=IfCondition(LaunchConfiguration('use_depth')),
+    )
+
     # -- IMU filter (Madgwick) --
     imu_filter_config = os.path.join(bringup_dir, 'config', 'imu_filter.yaml')
     imu_filter_node = Node(
@@ -96,10 +108,12 @@ def generate_launch_description():
         publish_odom_tf_arg,
         use_lidar_arg,
         use_camera_arg,
+        use_depth_arg,
         description_launch,
         driver_launch,
         lidar_node,
         camera_launch,
+        depth_camera_launch,
         imu_filter_node,
         ekf_node,
     ])
