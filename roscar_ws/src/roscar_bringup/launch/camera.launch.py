@@ -29,7 +29,7 @@ def _launch_camera(context):
             'width': width,
             'height': height,
             'format': 'RGB888',
-            'frame_id': 'camera_optical_frame',
+            'frame_id': 'webcam_optical_frame',
         }
         if camera_info_url:
             params['camera_info_url'] = camera_info_url
@@ -56,7 +56,7 @@ def _launch_camera(context):
             'video_device': video_device,
             'image_size': [width, height],
             'io_method': 'read',
-            'camera_frame_id': 'camera_optical_frame',
+            'camera_frame_id': 'webcam_optical_frame',
         }
         if camera_info_url:
             params['camera_info_url'] = camera_info_url

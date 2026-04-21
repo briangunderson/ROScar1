@@ -1,6 +1,9 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="roscar">
 
+  <!-- Include D435i macro from realsense2_description -->
+  <xacro:include filename="$(find realsense2_description)/urdf/_d435i.urdf.xacro"/>
+
   <!-- ==================== Robot Dimensions ==================== -->
   <!-- MEASURED 2026-03-16 with calipers and tape measure            -->
   <xacro:property name="chassis_length" value="0.200"/>   <!-- m, front-to-back (body, not incl wheel protrusion) -->
@@ -22,6 +25,13 @@
   <!-- Lidar position (relative to base_link) — TODO: measure precisely -->
   <xacro:property name="lidar_x" value="0.0"/>
   <xacro:property name="lidar_z" value="0.09"/>  <!-- scan plane ~18cm from floor -->
+
+  <!-- D435i depth camera position (relative to base_link) — front-facing, tilted slightly down -->
+  <!-- TODO: measure after physical mount — placeholder values below -->
+  <xacro:property name="d435i_x" value="0.09"/>    <!-- m, forward of center -->
+  <xacro:property name="d435i_y" value="0.0"/>     <!-- m, centered -->
+  <xacro:property name="d435i_z" value="0.07"/>    <!-- m, above base_link -->
+  <xacro:property name="d435i_pitch" value="0.175"/>  <!-- rad, ~10deg down tilt -->
 
   <!-- ==================== Materials ==================== -->
   <material name="dark_grey">
@@ -109,8 +119,11 @@
     <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
 
-  <!-- ==================== Camera Link ==================== -->
-  <link name="camera_link">
+  <!-- ==================== Logitech Webcam Link ==================== -->
+  <!-- NOTE: renamed from camera_link to webcam_link to free the "camera_link"
+       name for realsense2_description's D435i macro (below). Any consumer that
+       used camera_optical_frame should use webcam_optical_frame now. -->
+  <link name="webcam_link">
     <visual>
       <geometry>
         <box size="0.03 0.08 0.03"/>
@@ -119,20 +132,29 @@
     </visual>
   </link>
 
-  <joint name="camera_joint" type="fixed">
+  <joint name="webcam_joint" type="fixed">
     <parent link="base_link"/>
-    <child link="camera_link"/>
+    <child link="webcam_link"/>
     <origin xyz="${camera_x} 0 ${camera_z}" rpy="0 0 0"/>
   </joint>
 
   <!-- Optical frame: z forward, x right, y down (REP 103) -->
-  <link name="camera_optical_frame"/>
+  <link name="webcam_optical_frame"/>
 
-  <joint name="camera_optical_joint" type="fixed">
-    <parent link="camera_link"/>
-    <child link="camera_optical_frame"/>
+  <joint name="webcam_optical_joint" type="fixed">
+    <parent link="webcam_link"/>
+    <child link="webcam_optical_frame"/>
     <origin xyz="0 0 0" rpy="${-pi/2} 0 ${-pi/2}"/>
   </joint>
+
+  <!-- ==================== D435i Depth Camera ==================== -->
+  <!-- realsense2_description's sensor_d435i macro creates:
+         camera_link (body), camera_depth_frame, camera_color_frame,
+         camera_accel_frame, camera_gyro_frame, and their _optical variants.
+       Parented to base_link at the mount pose defined above. -->
+  <xacro:sensor_d435i parent="base_link" name="camera" use_nominal_extrinsics="true">
+    <origin xyz="${d435i_x} ${d435i_y} ${d435i_z}" rpy="0 ${d435i_pitch} 0"/>
+  </xacro:sensor_d435i>
 
   <!-- ==================== Lidar Link (RPLIDAR C1) ==================== -->
   <link name="laser">
