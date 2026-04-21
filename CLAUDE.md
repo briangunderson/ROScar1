@@ -4,7 +4,8 @@
 A ROS2 Jazzy workspace for a 4WD Mecanum wheel robot built on:
 - **Raspberry Pi 5** (Ubuntu 24.04 Server) running ROS2
 - **YB-ERF01-V3.0** (Yahboom STM32F103RCT6 motor driver board) connected via USB serial
-- **Logitech webcam** for vision
+- **Logitech webcam** for vision (ArUco + YOLO on remote GPU PC)
+- **Intel RealSense D435i** depth camera (USB 3.0 SuperSpeed) for 3D obstacle detection in Nav2 local costmap
 - **RPLIDAR C1** (Slamtec) for 2D laser scanning, connected via USB
 - **4x DC encoder motors** with mecanum wheels
 
@@ -54,6 +55,8 @@ Key: EKF owns odom->base_footprint TF (driver publish_odom_tf=false)
 | `roscar_ws/src/roscar_bringup/launch/slam.launch.py` | SLAM mapping (teleop + slam_toolbox) |
 | `roscar_ws/src/roscar_bringup/launch/navigation.launch.py` | Nav2 on saved map |
 | `roscar_ws/src/roscar_bringup/launch/slam_nav.launch.py` | SLAM + Nav2 combined |
+| `roscar_ws/src/roscar_bringup/launch/depth_camera.launch.py` | Intel RealSense D435i driver launch |
+| `roscar_ws/src/roscar_bringup/config/realsense_params.yaml` | D435i driver config (depth+color@15Hz, pointcloud) |
 | `roscar_ws/src/roscar_web/launch/web.launch.py` | Web dashboard (rosbridge+video+http) |
 | `roscar_ws/src/roscar_web/roscar_web/launch_manager_node.py` | Mode switching service node |
 | `roscar_ws/src/roscar_web/roscar_web/http_server_node.py` | Static file server node |
@@ -98,6 +101,10 @@ Key: EKF owns odom->base_footprint TF (driver publish_odom_tf=false)
 | `/local_plan` | Path | controller_server | Local trajectory |
 | `/aruco/markers` | MarkerArray | aruco_detector_node | Detected ArUco marker visualizations |
 | `/aruco/image` | Image | aruco_detector_node | Debug view with marker outlines |
+| `/camera/camera/depth/image_rect_raw` | Image | realsense2_camera | D435i depth image (16-bit, 848×480@15) |
+| `/camera/camera/color/image_raw` | Image | realsense2_camera | D435i color image (640×480@15) |
+| `/camera/camera/depth/color/points` | PointCloud2 | realsense2_camera | D435i pointcloud aligned to color (15Hz) |
+| `/local_costmap/voxel_marked_cloud` | PointCloud2 | nav2_costmap_2d | Voxel_layer 3D obstacle markers |
 | `/detections` | Detection2DArray | yolo_detector_node | YOLO detection results |
 | `/image_annotated` | Image | yolo_detector_node | Camera feed with bounding boxes |
 
@@ -260,6 +267,74 @@ ros2 launch roscar_bringup navigation.launch.py map:=$HOME/maps/my_map.yaml
 | vx | -0.2 | 0.5 | m/s |
 | vy | -0.3 | 0.3 | m/s (strafing) |
 | wz | -2.0 | 2.0 | rad/s |
+
+## Depth Camera (Intel RealSense D435i)
+
+Adds 3D obstacle detection to Nav2's local costmap — catches tables, chair
+seats, cables, and other obstacles the 2D lidar (scan plane at ~18cm) misses.
+
+### Hardware
+- **Bus:** USB 3.0 SuperSpeed (REQUIRED — USB 2.0 caps depth at 6 FPS and
+  causes MIPI errors under load). Verify with `dmesg | grep -i SuperSpeed`.
+- **Cable:** must be a genuine USB 3.0-rated USB-C to USB-A. Charging-only
+  USB-C cables force USB 2.0 fallback.
+- **Firmware:** 5.17.0.10 known-good (update via Intel RealSense Viewer on
+  Windows if needed).
+- **Mount:** front-center of upper deck, tilted ~10° down. URDF placeholder
+  pose at `d435i_x=0.09, d435i_z=0.07, d435i_pitch=0.175` — **TODO: measure
+  after physical mount.**
+
+### Launch
+```bash
+# Depth camera only (standalone):
+ros2 launch roscar_bringup depth_camera.launch.py
+
+# Full robot stack with depth enabled:
+ros2 launch roscar_bringup robot.launch.py use_depth:=true
+
+# Default is use_depth:=false so existing flows are unchanged.
+```
+
+### Streams (all at 15 Hz on Pi5)
+- **Depth:** 848×480 Z16, topic `/camera/camera/depth/image_rect_raw`
+- **Color:** 640×480 RGB8, topic `/camera/camera/color/image_raw`
+- **Pointcloud:** aligned to color, topic `/camera/camera/depth/color/points`
+- Decimation filter ×2 halves pointcloud density for Pi5 CPU savings.
+- Driver uses ~28% of one core on Pi5 with this config.
+
+### Nav2 Integration
+Local costmap gets a `voxel_layer` plugin with `d435i_depth` observation
+source subscribed to `/camera/camera/depth/color/points`:
+- `z_resolution: 0.1`, `z_voxels: 16` → 1.6m vertical range
+- `min_obstacle_height: 0.05` → ignores ground-plane noise
+- `obstacle_max_range: 3.0` → matches D435i useful depth range
+- Global costmap stays lidar-only (we don't want transient 3D noise in the
+  persistent map).
+
+### IMU Handling
+D435i has a built-in BMI055 IMU (accel + gyro). **It is disabled** in the
+driver config (`enable_gyro: false`, `enable_accel: false`). The STM32's
+ICM20948 stays the primary IMU for EKF. Enabling D435i IMU fusion requires
+deliberate extrinsic calibration and is explicitly out of scope.
+
+### TF Tree
+The URDF's `realsense2_description` xacro owns the camera's internal
+frames (`camera_link`, `camera_depth_frame`, `camera_color_frame`,
+`camera_accel_frame`, `camera_gyro_frame`, and all `*_optical_frame`
+variants). Driver has `publish_tf: false` to avoid duplicate broadcasts.
+
+### Param-Name Gotcha (aarch64 NEON)
+`realsense2_camera` autodetects CPU SIMD features and dynamically renames
+the pointcloud param namespace. On Pi5 (aarch64) it's `pointcloud__neon_.*`
+not `pointcloud.*`. YAML config uses the NEON-specific names; if ported to
+another architecture (x86 WSL2), update accordingly.
+
+### Name Collision Resolution
+The previous URDF used `camera_link` / `camera_optical_frame` for the
+Logitech webcam. These were renamed to `webcam_link` /
+`webcam_optical_frame` to free `camera_link` for `realsense2_description`.
+ArUco detector (`roscar_cv`) and landmark localizer (`roscar_driver`) were
+updated to use the new `webcam_optical_frame` name.
 
 ## Web Dashboard (roscar_web)
 

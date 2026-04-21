@@ -242,3 +242,36 @@
 - Observed: 4.98m "drift correction" with 105° yaw change — not drift correction, it's teleportation
 - **Rule**: NEVER run landmark localizer during SLAM mapping. Only use on a FIXED map (navigation mode with `load_learned: true`)
 - Landmark localizer belongs in `navigation.launch.py`, NOT `slam.launch.py`
+
+## Intel RealSense D435i (2026-04-21)
+- **USB 3.0 is NOT optional** — D435i on USB 2.0 caps at 6 FPS depth, triggers MIPI
+  errors under any real load. Verify with `dmesg | grep -i SuperSpeed` (NOT just "blue
+  USB port" — a charging-only USB-C cable forces USB 2.0 fallback even on a blue port).
+- **`lsusb -t` bus speed is the authoritative check**: 480M = USB 2.0, 5000M = USB 3.0.
+  The "Device USB type:" line in realsense2_camera_node's startup log also reports
+  USB version ("3.2" = USB 3.x).
+- **Original box cable is USB 3.0-rated** (look for "SuperSpeed" or "SS" on the connector
+  or jacket). Random USB-C cables from Amazon are often charging-only — they have the
+  4 USB 2.0 pins but not the 8 SuperSpeed pins, so connection succeeds but falls back.
+- **realsense2_description `sensor_d435i` macro signature (jazzy)**: only accepts
+  `parent`, `*origin`, `name`, `use_nominal_extrinsics`. Older/other-distro versions
+  have `topics_ns`, `add_plug`, `use_mesh` — those DON'T exist on jazzy and cause
+  "Invalid parameter" errors. Always `grep -A2 "xacro:macro name=\"sensor_d435i\""`
+  the actual macro file in `/opt/ros/<distro>/share/realsense2_description/urdf/`.
+- **realsense2_camera dynamic param namespace rename**: on aarch64 (Pi5), the
+  pointcloud param namespace is `pointcloud__neon_.*` not `pointcloud.*`. On x86 with
+  SSSE3 it's `pointcloud__ssse3_.*`. The driver rewrites at startup based on detected
+  CPU SIMD features. If a YAML parameter "silently has no effect", `ros2 param list`
+  the live node and look for the `__<simd>_` variant.
+- **Depth profile param is `depth_module.depth_profile`** not `depth_module.profile`.
+  Color is `rgb_camera.color_profile` not `rgb_camera.profile`.
+- **publish_tf: false** when URDF owns the camera TF tree via `realsense2_description`'s
+  xacro. Leaving it true causes duplicate static broadcasts + "extrapolation into the
+  future" spam in /tf.
+- **URDF name collision**: `realsense2_description`'s sensor_d435i macro always uses
+  `camera_link` as its body frame. Any existing `camera_link` (e.g. Logitech webcam)
+  MUST be renamed first. Ripple changes through: URDF, camera.launch.py `frame_id`
+  params, aruco_detector_node.py's `header.frame_id`, landmark_localizer_node.py's TF
+  lookup frame, camera_calibration.yaml (if it has a frame_id), any rviz config.
+- **CPU budget on Pi5** for realsense2_camera with depth+color@15 + decimation×2:
+  ~28% of one core. Well within budget.

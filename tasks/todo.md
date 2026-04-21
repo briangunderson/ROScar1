@@ -36,3 +36,37 @@
 - [x] SLAM verified: /map publishing (74×135 cells @ 5cm), map->odom TF, all 8 nodes running
 - [ ] Save first map and test Nav2 navigation
 - [ ] Verify holonomic motion (strafing) during navigation
+
+## Milestone 5: D435i Depth Camera Integration (in progress)
+Plan: `docs/superpowers/plans/2026-04-21-d435i-depth-camera-integration.md`
+
+- [x] USB 3.0 SuperSpeed connection verified (new cable required)
+- [x] Install ros-jazzy-realsense2-{camera,description} + pointcloud_to_laserscan on Pi
+- [x] URDF: rename camera_link→webcam_link, add sensor_d435i xacro from realsense2_description
+- [x] Update dependent files: camera.launch.py, aruco_detector_node.py, landmark_localizer_node.py
+- [x] realsense_params.yaml: 848×480@15 depth, 640×480@15 color, aligned pointcloud, IMU disabled
+- [x] depth_camera.launch.py (standalone) + robot.launch.py use_depth:=true flag (default false)
+- [x] Nav2 local costmap: voxel_layer with d435i_depth observation source
+- [x] CLAUDE.md: Depth Camera section, topics table, critical files
+- [ ] **Physical mount**: measure actual D435i mount pose, update URDF placeholders
+  (d435i_x, d435i_y, d435i_z, d435i_pitch)
+- [ ] **End-to-end test**: restart live SLAM stack with use_depth:=true, place physical
+  obstacle, verify voxel_marked_cloud lights up and local costmap inflates
+- [ ] **Dashboard depth stream toggle** (deferred): add DEPTH mode to aio-camera.js
+  that routes to web_video_server's depth stream
+- [ ] **D435i IMU fusion** (deferred, explicit non-goal): would require extrinsic
+  calibration vs STM32 IMU position
+
+### Review (2026-04-21)
+- **What landed**: full driver + URDF + launch + Nav2 voxel_layer on branch
+  `feat/d435i-depth-camera`. Driver verified at 15Hz on USB 3.0, 28% CPU on one core.
+- **Hardware gotcha found**: original USB-C cable was charging-only, forced USB 2.0
+  fallback + MIPI errors. New cable fixed it. Documented in CLAUDE.md.
+- **URDF gotcha found**: realsense2_description's `sensor_d435i` macro signature is
+  `(parent, *origin, name, use_nominal_extrinsics)` — earlier `topics_ns/add_plug/use_mesh`
+  params I expected don't exist in the jazzy version. Simplified instantiation works.
+- **Param-name gotcha found**: realsense2_camera dynamically renames the pointcloud
+  param namespace based on CPU SIMD features. On Pi5 aarch64 it's `pointcloud__neon_.*`
+  not `pointcloud.*`. Documented in YAML comments and CLAUDE.md.
+- **Not verified end-to-end**: voxel_layer integration not yet tested with a physical
+  obstacle and Nav2 running — requires restarting the live stack with use_depth:=true.
