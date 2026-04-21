@@ -1,0 +1,75 @@
+#
+# Intel RealSense D435i driver config for ROScar1.
+#
+# Tuned for USB 3.0 on the Pi5 with headroom for Nav2 to consume the point
+# cloud without saturating the USB bus or the CPU.
+#
+# - Depth @ 848x480x15, Color @ 640x480x15 — matches the D435i's native stereo
+#   depth resolution and stays within USB 3.0 bandwidth with decimation on.
+# - Pointcloud aligned to color so every point has RGB (useful for
+#   visualization and for Nav2 debug).
+# - Decimation filter magnitude 2 (halves pointcloud density) to cut Pi5 CPU.
+# - IMU DISABLED — STM32 IMU remains the primary source for EKF. Enable only
+#   after deliberate extrinsic calibration.
+# - publish_tf=false — URDF (realsense2_description xacro) already owns the
+#   TF tree for the camera's internal frames.
+#
+# GOTCHA: realsense2_camera autodetects CPU SIMD features and renames the
+# pointcloud param namespace accordingly. On ARM (Pi5) it's
+# `pointcloud__neon_.*`. On x86 with SSSE3 it'd be `pointcloud__ssse3_.*`,
+# and on generic x86 it's plain `pointcloud.*`. This config is Pi-specific.
+#
+/camera/camera:
+  ros__parameters:
+    # --- Device selection ---
+    serial_no: ""
+    usb_port_id: ""
+    device_type: ""
+
+    # --- Frame-of-reference naming (matches the xacro macro in URDF) ---
+    camera_name: "camera"
+    base_frame_id: "camera_link"
+
+    # --- Streams ---
+    enable_depth: true
+    enable_color: true
+    enable_infra1: false
+    enable_infra2: false
+    enable_sync: true
+
+    # Resolutions and framerates — balanced for USB 3.0 headroom on a Pi5.
+    # 15 FPS keeps Pi5 CPU load manageable with decimation + temporal filters.
+    depth_module.depth_profile: "848x480x15"
+    rgb_camera.color_profile: "640x480x15"
+
+    # --- Point cloud (Pi5 / aarch64 → NEON namespace) ---
+    pointcloud__neon_.enable: true
+    pointcloud__neon_.stream_filter: 2         # 2 = RS2_STREAM_COLOR (aligned pointcloud)
+    pointcloud__neon_.stream_index_filter: 0
+    pointcloud__neon_.ordered_pc: false
+    pointcloud__neon_.allow_no_texture_points: false
+
+    # Align depth to color so pointcloud has RGB and uses color intrinsics.
+    align_depth.enable: true
+
+    # --- Filters (post-processing) ---
+    # Decimation halves pointcloud density — big CPU saver on Pi5.
+    decimation_filter.enable: true
+    decimation_filter.filter_magnitude: 2
+
+    # Spatial + temporal filters clean noise. Defaults are reasonable.
+    spatial_filter.enable: true
+    temporal_filter.enable: true
+    hole_filling_filter.enable: false
+
+    # --- IMU: DISABLED for now ---
+    # STM32 IMU remains primary for EKF. Enable only with deliberate
+    # extrinsic calibration + EKF config changes.
+    enable_gyro: false
+    enable_accel: false
+    unite_imu_method: 0
+
+    # --- Misc ---
+    publish_tf: false         # URDF owns the TF tree for the D435i's internal frames
+    initial_reset: false
+    diagnostics_period: 1.0
