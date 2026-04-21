@@ -56,6 +56,10 @@ Plan: `docs/superpowers/plans/2026-04-21-d435i-depth-camera-integration.md`
   that routes to web_video_server's depth stream
 - [ ] **D435i IMU fusion** (deferred, explicit non-goal): would require extrinsic
   calibration vs STM32 IMU position
+- [x] **Logitech retirement**: remove webcam from URDF, default use_camera:=false,
+  remap D435i color to /image_raw so dashboard+ArUco+YOLO work unchanged,
+  bump color FPS 15→30, revert aruco/landmark frames back to
+  camera_color_optical_frame
 
 ### Review (2026-04-21)
 - **What landed**: full driver + URDF + launch + Nav2 voxel_layer on branch

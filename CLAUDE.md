@@ -4,8 +4,7 @@
 A ROS2 Jazzy workspace for a 4WD Mecanum wheel robot built on:
 - **Raspberry Pi 5** (Ubuntu 24.04 Server) running ROS2
 - **YB-ERF01-V3.0** (Yahboom STM32F103RCT6 motor driver board) connected via USB serial
-- **Logitech webcam** for vision (ArUco + YOLO on remote GPU PC)
-- **Intel RealSense D435i** depth camera (USB 3.0 SuperSpeed) for 3D obstacle detection in Nav2 local costmap
+- **Intel RealSense D435i** depth camera (USB 3.0 SuperSpeed) — provides both depth pointcloud (for Nav2 voxel_layer 3D obstacles) AND color stream (for ArUco, YOLO, dashboard). Replaces the previous Logitech webcam.
 - **RPLIDAR C1** (Slamtec) for 2D laser scanning, connected via USB
 - **4x DC encoder motors** with mecanum wheels
 
@@ -94,15 +93,14 @@ Key: EKF owns odom->base_footprint TF (driver publish_odom_tf=false)
 | `/scan_raw` | LaserScan | sllidar_node | RPLIDAR C1 raw laser scan (includes chassis reflections) |
 | `/scan` | LaserScan | laser_filter | Filtered scan (chassis reflections < 0.15m removed) |
 | `/odometry/filtered` | Odometry | ekf_node | Fused odometry (wheels+IMU) |
-| `/image_raw` | Image | v4l2_camera | Camera feed (640x480, 30fps) |
-| `/camera_info` | CameraInfo | v4l2_camera | Camera calibration info |
+| `/image_raw` | Image | realsense2_camera | Color feed (640×480@30, REMAPPED from /camera/camera/color/image_raw) |
+| `/camera_info` | CameraInfo | realsense2_camera | Factory intrinsics (REMAPPED from /camera/camera/color/camera_info) |
 | `/map` | OccupancyGrid | slam_toolbox | SLAM-generated map |
 | `/plan` | Path | planner_server | Global navigation path |
 | `/local_plan` | Path | controller_server | Local trajectory |
 | `/aruco/markers` | MarkerArray | aruco_detector_node | Detected ArUco marker visualizations |
 | `/aruco/image` | Image | aruco_detector_node | Debug view with marker outlines |
 | `/camera/camera/depth/image_rect_raw` | Image | realsense2_camera | D435i depth image (16-bit, 848×480@15) |
-| `/camera/camera/color/image_raw` | Image | realsense2_camera | D435i color image (640×480@15) |
 | `/camera/camera/depth/color/points` | PointCloud2 | realsense2_camera | D435i pointcloud aligned to color (15Hz) |
 | `/local_costmap/voxel_marked_cloud` | PointCloud2 | nav2_costmap_2d | Voxel_layer 3D obstacle markers |
 | `/detections` | Detection2DArray | yolo_detector_node | YOLO detection results |
@@ -270,8 +268,9 @@ ros2 launch roscar_bringup navigation.launch.py map:=$HOME/maps/my_map.yaml
 
 ## Depth Camera (Intel RealSense D435i)
 
-Adds 3D obstacle detection to Nav2's local costmap — catches tables, chair
-seats, cables, and other obstacles the 2D lidar (scan plane at ~18cm) misses.
+The D435i is the robot's sole camera — it replaced the Logitech webcam.
+Provides **both** a depth pointcloud (for Nav2's 3D voxel_layer local costmap)
+**and** a color stream (for ArUco, YOLO, dashboard). One sensor, two jobs.
 
 ### Hardware
 - **Bus:** USB 3.0 SuperSpeed (REQUIRED — USB 2.0 caps depth at 6 FPS and
@@ -295,10 +294,13 @@ ros2 launch roscar_bringup robot.launch.py use_depth:=true
 # Default is use_depth:=false so existing flows are unchanged.
 ```
 
-### Streams (all at 15 Hz on Pi5)
-- **Depth:** 848×480 Z16, topic `/camera/camera/depth/image_rect_raw`
-- **Color:** 640×480 RGB8, topic `/camera/camera/color/image_raw`
-- **Pointcloud:** aligned to color, topic `/camera/camera/depth/color/points`
+### Streams
+- **Depth:** 848×480 Z16 @ 15 Hz, topic `/camera/camera/depth/image_rect_raw`
+- **Color:** 640×480 RGB8 @ 30 Hz, topic `/image_raw` (REMAPPED from
+  `/camera/camera/color/image_raw` so existing consumers — dashboard MJPEG
+  stream, ArUco, YOLO — work with zero code changes)
+- **Camera info:** topic `/camera_info` (REMAPPED — factory intrinsics)
+- **Pointcloud:** aligned to color @ 15 Hz, topic `/camera/camera/depth/color/points`
 - Decimation filter ×2 halves pointcloud density for Pi5 CPU savings.
 - Driver uses ~28% of one core on Pi5 with this config.
 
@@ -329,12 +331,22 @@ the pointcloud param namespace. On Pi5 (aarch64) it's `pointcloud__neon_.*`
 not `pointcloud.*`. YAML config uses the NEON-specific names; if ported to
 another architecture (x86 WSL2), update accordingly.
 
-### Name Collision Resolution
-The previous URDF used `camera_link` / `camera_optical_frame` for the
-Logitech webcam. These were renamed to `webcam_link` /
-`webcam_optical_frame` to free `camera_link` for `realsense2_description`.
-ArUco detector (`roscar_cv`) and landmark localizer (`roscar_driver`) were
-updated to use the new `webcam_optical_frame` name.
+### Camera Consolidation (Logitech removed)
+The Logitech webcam was retired when the D435i replaced it. History:
+1. First pass kept both cameras, renaming Logitech's URDF frames to
+   `webcam_link` / `webcam_optical_frame` to free `camera_link` for the
+   D435i's `realsense2_description` xacro.
+2. Second pass removed the Logitech entirely — ArUco and YOLO now consume
+   the D435i's color stream, which is factory-calibrated and global-shutter
+   (better for marker detection than the Logitech's rolling shutter).
+3. The D435i driver launch remaps `/camera/camera/color/image_raw` →
+   `/image_raw` and `/camera/camera/color/camera_info` → `/camera_info` so
+   existing consumers (dashboard MJPEG, ArUco, YOLO) needed no changes.
+4. ArUco detector publishes marker TFs under `camera_color_optical_frame`
+   (the D435i's factory optical frame); landmark localizer looks up
+   `map → camera_color_optical_frame` accordingly.
+5. `use_camera:=false` is the default in `robot.launch.py` now (v4l2_camera
+   only runs if you physically reattach the Logitech and set the flag).
 
 ## Web Dashboard (roscar_web)
 

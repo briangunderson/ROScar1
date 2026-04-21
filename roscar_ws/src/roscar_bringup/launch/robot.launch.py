@@ -25,12 +25,16 @@ def generate_launch_description():
         description='Launch the RPLIDAR C1 node',
     )
     use_camera_arg = DeclareLaunchArgument(
-        'use_camera', default_value='true',
-        description='Launch the webcam (v4l2_camera) node',
+        'use_camera', default_value='false',
+        description='Launch the legacy webcam (v4l2_camera) node — default off '
+                    'since the D435i replaced the Logitech. Set true only if '
+                    'you physically reattach the Logitech webcam.',
     )
     use_depth_arg = DeclareLaunchArgument(
-        'use_depth', default_value='false',
-        description='Launch the Intel RealSense D435i depth camera',
+        'use_depth', default_value='true',
+        description='Launch the Intel RealSense D435i depth camera (provides '
+                    'both depth pointcloud AND color stream remapped to '
+                    '/image_raw). Disable only if the D435i is unplugged.',
     )
 
     # -- URDF (robot_state_publisher + joint_state_publisher) --

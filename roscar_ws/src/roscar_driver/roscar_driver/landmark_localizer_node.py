@@ -13,8 +13,8 @@ Supports two modes:
 
 Architecture: Subscribes directly to /aruco/markers (visualization_msgs) from
 the ArUco detector on WSL2. Uses the raw marker pose (in optical frame convention
-from OpenCV's solvePnP) plus local TF chain (map->webcam_optical_frame) to compute
-marker position in map frame. The URDF's webcam_optical_frame joint handles the
+from OpenCV's solvePnP) plus local TF chain (map->camera_color_optical_frame) to compute
+marker position in map frame. The URDF's camera_color_optical_frame joint handles the
 optical-to-ROS coordinate conversion via its rpy=(-π/2, 0, -π/2) rotation.
 This avoids relying on cross-machine /tf for ArUco frames, which has DDS
 discovery issues with CycloneDDS unicast when many participants are active.
@@ -143,7 +143,7 @@ class LandmarkLocalizerNode(Node):
         self.marker_ids = self.get_parameter('marker_ids').value
         self.velocity_threshold = self.get_parameter('velocity_threshold').value
 
-        # TF — only used for LOCAL transforms (map->webcam_optical_frame)
+        # TF — only used for LOCAL transforms (map->camera_color_optical_frame)
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
@@ -282,14 +282,14 @@ class LandmarkLocalizerNode(Node):
         """Process ArUco marker detections directly from /aruco/markers topic.
 
         Each marker in the array has:
-        - header.frame_id = 'webcam_optical_frame'
+        - header.frame_id = 'camera_color_optical_frame'
         - id = ArUco marker ID
         - pose = marker pose in OPTICAL frame convention (z=forward, x=right, y=down)
                  (OpenCV's solvePnP always returns in camera/optical convention)
 
-        Instead of manually converting optical→webcam_link, we use the URDF's
-        webcam_optical_frame (which already has the correct rpy=-π/2,0,-π/2
-        rotation relative to webcam_link). We look up map→webcam_optical_frame
+        Instead of manually converting optical→camera_link, we use the URDF's
+        camera_color_optical_frame (which already has the correct rpy=-π/2,0,-π/2
+        rotation relative to camera_link). We look up map→camera_color_optical_frame
         and use the raw tvec directly — the TF tree handles the frame rotation.
         """
         if not msg.markers:
@@ -327,18 +327,18 @@ class LandmarkLocalizerNode(Node):
             optical_pose.orientation.z = 0.0
             optical_pose.orientation.w = 1.0
 
-            # Look up LOCAL TF: map -> webcam_optical_frame
-            # The URDF defines webcam_optical_frame with rpy=(-π/2, 0, -π/2)
+            # Look up LOCAL TF: map -> camera_color_optical_frame
+            # The URDF defines camera_color_optical_frame with rpy=(-π/2, 0, -π/2)
             # relative to camera_link, so the TF tree handles the optical→ROS
             # coordinate conversion automatically.
             try:
                 map_to_optical = self.tf_buffer.lookup_transform(
-                    'map', 'webcam_optical_frame', Time(),
+                    'map', 'camera_color_optical_frame', Time(),
                     timeout=rclpy.duration.Duration(seconds=0.1))
             except (tf2_ros.LookupException, tf2_ros.ConnectivityException,
                     tf2_ros.ExtrapolationException) as e:
                 self.get_logger().debug(
-                    f'Marker {marker_id}: map->webcam_optical_frame TF failed: {e}')
+                    f'Marker {marker_id}: map->camera_color_optical_frame TF failed: {e}')
                 continue
 
             # Compute map -> marker by chaining: map->optical * optical->marker

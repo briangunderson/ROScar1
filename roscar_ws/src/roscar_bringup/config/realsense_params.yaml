@@ -38,9 +38,11 @@
     enable_sync: true
 
     # Resolutions and framerates — balanced for USB 3.0 headroom on a Pi5.
-    # 15 FPS keeps Pi5 CPU load manageable with decimation + temporal filters.
+    # Depth 15 Hz keeps Pi5 CPU manageable with decimation + temporal filters.
+    # Color 30 Hz since it's the only camera now (replaces Logitech) — the
+    # dashboard, ArUco, and YOLO all prefer 30 FPS and USB 3.0 has headroom.
     depth_module.depth_profile: "848x480x15"
-    rgb_camera.color_profile: "640x480x15"
+    rgb_camera.color_profile: "640x480x30"
 
     # --- Point cloud (Pi5 / aarch64 → NEON namespace) ---
     pointcloud__neon_.enable: true

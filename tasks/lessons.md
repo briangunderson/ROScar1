@@ -275,3 +275,14 @@
   lookup frame, camera_calibration.yaml (if it has a frame_id), any rviz config.
 - **CPU budget on Pi5** for realsense2_camera with depth+color@15 + decimation×2:
   ~28% of one core. Well within budget.
+- **D435i replaces the Logitech webcam outright** — its color camera is factory
+  calibrated (no checkerboard), global shutter (less motion blur than Logitech's
+  rolling shutter), and already in the budget. Rather than maintain two camera
+  frames + two URDF links + two sets of CV pipelines, use topic remaps in
+  `depth_camera.launch.py` to publish D435i color as `/image_raw` and
+  `/camera_info`. Consumers don't know or care. Keep `use_camera:=false` as
+  default in `robot.launch.py` so the legacy v4l2_camera node doesn't spawn
+  and complain about a missing `/dev/video0`.
+- **ArUco frame restored to `camera_color_optical_frame`** (realsense2_description's
+  factory name) once the Logitech was retired. Don't invent frame names if a
+  library-provided one already fits.

@@ -176,10 +176,10 @@ class ArucoDetectorNode(Node):
         self.marker_pub.publish(marker_array)
 
     def _publish_tf(self, stamp, marker_id, rvec, tvec):
-        """Broadcast TF: webcam_optical_frame → aruco_{id}."""
+        """Broadcast TF: camera_color_optical_frame → aruco_{id}."""
         t = TransformStamped()
         t.header.stamp = stamp
-        t.header.frame_id = 'webcam_optical_frame'
+        t.header.frame_id = 'camera_color_optical_frame'
         t.child_frame_id = f'{self.tf_prefix}{marker_id}'
 
         t.transform.translation.x = float(tvec[0])
@@ -201,7 +201,7 @@ class ArucoDetectorNode(Node):
         """Create an rviz Marker (cube) for a detected ArUco marker."""
         m = Marker()
         m.header.stamp = stamp
-        m.header.frame_id = 'webcam_optical_frame'
+        m.header.frame_id = 'camera_color_optical_frame'
         m.ns = 'aruco'
         m.id = int(marker_id)
         m.type = Marker.CUBE

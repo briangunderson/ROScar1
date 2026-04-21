@@ -2,6 +2,11 @@
 
 Publishes under the /camera/camera/* namespace. Frames are owned by the URDF
 (realsense2_description xacro), not by this driver (publish_tf=false).
+
+Topic remaps: the D435i's color stream is also remapped to the legacy /image_raw
+and /camera_info topics, so existing consumers (dashboard MJPEG stream, ArUco
+detector, YOLO) keep working with zero code changes. The D435i replaces the
+Logitech webcam — there's one camera now, not two.
 """
 
 import os
@@ -20,6 +25,14 @@ def generate_launch_description():
         name='camera',
         namespace='camera',
         parameters=[params_file],
+        remappings=[
+            # Expose D435i color as the canonical /image_raw + /camera_info
+            # so the dashboard (web_video_server), ArUco detector, and YOLO
+            # keep working with no config changes.
+            ('/camera/camera/color/image_raw', '/image_raw'),
+            ('/camera/camera/color/image_raw/compressed', '/image_raw/compressed'),
+            ('/camera/camera/color/camera_info', '/camera_info'),
+        ],
         output='screen',
         emulate_tty=True,
     )
