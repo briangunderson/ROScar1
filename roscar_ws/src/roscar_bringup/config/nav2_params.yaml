@@ -243,7 +243,7 @@ local_costmap:
       resolution: 0.05
       # Robot footprint (measured 2026-03-16: 290x245mm overall)
       footprint: "[[0.145, 0.123], [0.145, -0.123], [-0.145, -0.123], [-0.145, 0.123]]"
-      plugins: ["obstacle_layer", "inflation_layer"]
+      plugins: ["obstacle_layer", "voxel_layer", "inflation_layer"]
       obstacle_layer:
         plugin: nav2_costmap_2d::ObstacleLayer
         enabled: true
@@ -258,6 +258,33 @@ local_costmap:
           raytrace_min_range: 0.0
           obstacle_max_range: 2.5
           obstacle_min_range: 0.0
+      # 3D obstacle detection from the D435i — catches things the 2D lidar
+      # misses (tables, chair seats, hanging cables). Only active when the
+      # depth camera is running (use_depth:=true); otherwise this layer has
+      # no observations and behaves as a no-op.
+      voxel_layer:
+        plugin: nav2_costmap_2d::VoxelLayer
+        enabled: true
+        footprint_clearing_enabled: true
+        max_obstacle_height: 1.5
+        publish_voxel_map: true
+        origin_z: 0.0
+        z_resolution: 0.1
+        z_voxels: 16            # 16 * 0.1m = 1.6m vertical range
+        unknown_threshold: 15
+        mark_threshold: 0
+        observation_sources: d435i_depth
+        d435i_depth:
+          topic: /camera/camera/depth/color/points
+          max_obstacle_height: 1.5
+          min_obstacle_height: 0.05    # ignore ground-plane noise
+          obstacle_max_range: 3.0      # D435i useful depth range
+          obstacle_min_range: 0.2
+          raytrace_max_range: 3.5
+          raytrace_min_range: 0.0
+          clearing: true
+          marking: true
+          data_type: PointCloud2
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         cost_scaling_factor: 3.0
