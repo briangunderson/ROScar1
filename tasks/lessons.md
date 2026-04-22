@@ -286,3 +286,35 @@
 - **ArUco frame restored to `camera_color_optical_frame`** (realsense2_description's
   factory name) once the Logitech was retired. Don't invent frame names if a
   library-provided one already fits.
+- **Pi5 + D435i + RPLIDAR C1 USB power contention**. With both devices attached,
+  the RPLIDAR's CP2102N bridge reports `cp210x ttyUSB1: failed set request 0x12
+  status: -110` (ETIMEDOUT on `CP210X_PURGE`) and every `sllidar_node` start
+  fails with `SL_RESULT_OPERATION_TIMEOUT`. Unplug the D435i and the lidar
+  works; plug it back and the lidar breaks again. Root cause: Pi5 defaults to
+  a conservative 600 mA per USB port — the D435i pulls ~700 mA on USB 3.0 and
+  the combined draw destabilises the CP2102N's USB control endpoint. Fix: set
+  `usb_max_current_enable=1` in `/boot/firmware/config.txt` (now in
+  `setup_rpi.sh`). With the flag on, both devices coexist. The flag is harmless
+  — it only raises the allowed ceiling; it doesn't force extra draw. Verified
+  on a Pi5 with the official 27W PSU.
+- **Dashboard-issued mode switches must go via the `/web/set_mode` service.**
+  Never start a robot launch via SSH while the dashboard's launch_manager is
+  in a non-idle mode — you'll end up with TWO `ros2 launch` processes each
+  spawning their own `realsense2_camera_node`, which fight over the D435i's
+  V4L2 device (`xioctl(VIDIOC_S_FMT) failed, errno=16 EBUSY`) and the launch
+  respawn cycle makes `/rosout` unreadable. Either set dashboard to `idle`
+  first, or use `ros2 service call /web/set_mode` to launch through the
+  dashboard. Also: when SSH-ing to a non-interactive shell, `.bashrc` isn't
+  sourced, so you MUST `export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp` and
+  `export CYCLONEDDS_URI=file://$HOME/cyclonedds.xml` explicitly before any
+  `ros2 service call` or `rclpy` client — otherwise DDS discovery can't find
+  local services and calls time out mysteriously.
+- **mjpeg_grabber legacy node** in `roscar_cv` was bridging the Pi's
+  mjpg-streamer (port 8081, no longer running) into `/image_raw`. After the
+  D435i became the canonical source for `/image_raw` (via a remap in
+  `depth_camera.launch.py`), mjpeg_grabber still ran from `cv.launch.py`,
+  failed to connect, and became a SECOND publisher on `/image_raw` —
+  confusing `web_video_server` enough that the AIO dashboard's CAMERA panel
+  went offline. Removed from canonical `cv.launch.py`. If the WSL2 source
+  tree diverges (you added nodes there that aren't in the canonical repo),
+  they can re-appear; sync Windows → WSL2 after every canonical change.

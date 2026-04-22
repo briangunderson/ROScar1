@@ -68,6 +68,26 @@ udevadm trigger
 echo "  -> YB-ERF01-V3.0 will be available at /dev/roscar_board"
 echo "  -> RPLIDAR C1 will be available at /dev/rplidar"
 
+# ---- 5b. Enable full USB power budget ----
+# Pi5 defaults to a conservative 600 mA per USB port. With the D435i depth
+# camera AND the RPLIDAR C1 both attached, the CP2102N bridge chip in the
+# RPLIDAR times out on control requests (status: -110 / ETIMEDOUT) when
+# running at the default budget. Enabling usb_max_current_enable=1 lifts
+# the limit to the PSU's full capacity (~1.6 A with the official Pi PSU)
+# and lets both peripherals coexist.
+#
+# Empirically: without this + with both devices attached, RPLIDAR throws
+# SL_RESULT_OPERATION_TIMEOUT on every sllidar_node start. With this set,
+# both work simultaneously on a Pi5 official PSU.
+CONFIG_TXT=/boot/firmware/config.txt
+if ! grep -qE "^usb_max_current_enable=" "$CONFIG_TXT"; then
+    echo "[5b] Adding usb_max_current_enable=1 to $CONFIG_TXT..."
+    sed -i '/^\[all\]/a usb_max_current_enable=1' "$CONFIG_TXT"
+    echo "  -> USB full-power budget enabled (takes effect on next reboot)"
+else
+    echo "[5b] usb_max_current_enable already set in $CONFIG_TXT"
+fi
+
 # ---- 6. Clone sllidar_ros2 (RPLIDAR C1 driver) ----
 echo "[6/8] Cloning sllidar_ros2 driver..."
 WORKSPACE_SRC="/home/${SUDO_USER:-$USER}/roscar_ws/src"
