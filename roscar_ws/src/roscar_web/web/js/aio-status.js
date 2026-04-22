@@ -178,25 +178,36 @@ function setupServices() {
   });
 
   // Fetch current mode from launch_manager so UI reflects reality after refresh
+  // AND after any out-of-band change (SSH-initiated set_mode, another browser tab,
+  // crash+respawn of the robot stack, etc).
   const getStatusSvc = new ROSLIB.Service({
     ros, name: '/web/get_status', serviceType: 'roscar_interfaces/GetStatus',
   });
-  getStatusSvc.callService(new ROSLIB.ServiceRequest({}), (resp) => {
-    if (resp.mode) {
+
+  // Sync local UI state with whatever the launch_manager says is running.
+  // Called once at init and then periodically via setInterval below.
+  function syncModeFromServer() {
+    getStatusSvc.callService(new ROSLIB.ServiceRequest({}), (resp) => {
+      if (!resp.mode || resp.mode === currentMode) return;
       currentMode = resp.mode;
       setEl('mode-display', resp.mode.toUpperCase());
-      // Update mode button active state
       document.querySelectorAll('#panel-status .mode-btn-sm[data-mode]').forEach(b => {
         b.classList.toggle('active', b.dataset.mode === currentMode);
       });
-      // Enable nav goal clicking if already in a nav mode
-      if ((currentMode === 'navigation' || currentMode === 'slam_nav') && navGoalCallback) {
-        navGoalCallback(true);
+      if (navGoalCallback) {
+        navGoalCallback(currentMode === 'navigation' || currentMode === 'slam_nav');
       }
-    }
-  }, (err) => {
-    console.warn('Could not fetch current mode:', err);
-  });
+    }, (err) => {
+      console.warn('Could not fetch current mode:', err);
+    });
+  }
+
+  // Initial sync.
+  syncModeFromServer();
+
+  // Periodic re-sync (every 3s). Cheap — the service is local, no ROS traffic
+  // beyond rosbridge <-> launch_manager. Catches out-of-band mode changes.
+  setInterval(syncModeFromServer, 3000);
 }
 
 // ── Mode Buttons ────────────────────────────────────────────────────────────
