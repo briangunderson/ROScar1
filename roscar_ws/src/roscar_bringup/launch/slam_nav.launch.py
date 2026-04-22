@@ -18,14 +18,21 @@ Save the map when done:
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
 def generate_launch_description():
     bringup_dir = get_package_share_directory('roscar_bringup')
     nav2_bringup_dir = get_package_share_directory('nav2_bringup')
+
+    # -- Forwarded launch args --
+    use_depth_arg = DeclareLaunchArgument(
+        'use_depth', default_value='true',
+        description='Launch the D435i depth camera (feeds voxel_layer in local costmap)',
+    )
 
     # -- Full robot bringup (driver + URDF + lidar + IMU filter + EKF) --
     robot_launch = IncludeLaunchDescription(
@@ -34,6 +41,7 @@ def generate_launch_description():
         ),
         launch_arguments={
             'use_lidar': 'true',
+            'use_depth': LaunchConfiguration('use_depth'),
         }.items(),
     )
 
@@ -68,6 +76,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        use_depth_arg,
         robot_launch,
         nav2_launch,
         landmark_node,

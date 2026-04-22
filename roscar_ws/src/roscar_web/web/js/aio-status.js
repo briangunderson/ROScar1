@@ -295,7 +295,13 @@ function requestSetMode(mode, mapPath, statusEl) {
 
   showMsg(statusEl, `Switching to ${mode.toUpperCase()}...`);
 
-  const req = new ROSLIB.ServiceRequest({ mode, map_path: mapPath });
+  // use_depth: true by default — the D435i is now the sole camera and is
+  // expected in all modes. A future checkbox could override this.
+  const req = new ROSLIB.ServiceRequest({
+    mode,
+    map_path: mapPath,
+    use_depth: true,
+  });
   setModeSvc.callService(req, (resp) => {
     if (resp.success) {
       currentMode = mode;

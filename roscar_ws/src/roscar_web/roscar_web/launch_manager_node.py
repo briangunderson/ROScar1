@@ -57,6 +57,10 @@ class LaunchManagerNode(Node):
 
     def _set_mode_callback(self, request, response):
         mode = request.mode.strip()
+        self.get_logger().info(
+            f'set_mode request received: mode={mode!r} '
+            f'map_path={request.map_path!r} use_depth={request.use_depth}'
+        )
 
         if mode not in AVAILABLE_MODES:
             response.success = False
@@ -80,6 +84,10 @@ class LaunchManagerNode(Node):
                     response.message = 'map_path required for navigation mode'
                     return response
                 cmd.append(f'map:={map_path}')
+
+            # Forward use_depth to any mode — all four parent launch files
+            # (teleop=robot, slam, navigation, slam_nav) declare the arg.
+            cmd.append(f'use_depth:={"true" if request.use_depth else "false"}')
 
         # Stop current launch
         self._stop_current()
