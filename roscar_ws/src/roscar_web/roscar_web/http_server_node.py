@@ -16,7 +16,20 @@ from ament_index_python.packages import get_package_share_directory
 
 
 class SilentHTTPHandler(SimpleHTTPRequestHandler):
-    """HTTP handler that suppresses per-request log noise."""
+    """HTTP handler that suppresses per-request log noise.
+
+    Also sets no-cache headers on all responses so the browser always
+    revalidates — otherwise ES module imports (which the dashboard uses
+    heavily) get aggressively cached and a server-side JS update doesn't
+    take effect until the user manually clears their browser cache.
+    Dashboard traffic is tiny and local, so bypassing cache costs nothing.
+    """
+
+    def end_headers(self):
+        self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate')
+        self.send_header('Pragma', 'no-cache')
+        self.send_header('Expires', '0')
+        super().end_headers()
 
     def log_message(self, format, *args):
         pass  # Suppress default stdout logging

@@ -321,6 +321,8 @@
   <!-- ═══════════════════ SCRIPTS ═══════════════════ -->
   <script src="js/lib/roslib.min.js"></script>
   <script src="js/lib/nipplejs.min.js"></script>
-  <script type="module" src="js/aio-app.js"></script>
+  <!-- Version-bust on every aio.html update so browsers fetch fresh JS.
+       Bump the number below whenever shipping new JS modules. -->
+  <script type="module" src="js/aio-app.js?v=2026-04-22-d435i"></script>
 </body>
 </html>
