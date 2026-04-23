@@ -35,14 +35,29 @@
     enable_color: true
     enable_infra1: false
     enable_infra2: false
-    enable_sync: true
+    enable_sync: false  # sync is NOT required by any current consumer and
+                        # adding it seems to correlate with depth wedging
 
     # Resolutions and framerates — balanced for USB 3.0 headroom on a Pi5.
     # Depth 15 Hz keeps Pi5 CPU manageable with decimation + temporal filters.
     # Color 30 Hz since it's the only camera now (replaces Logitech) — the
     # dashboard, ArUco, and YOLO all prefer 30 FPS and USB 3.0 has headroom.
-    depth_module.depth_profile: "848x480x15"
-    rgb_camera.color_profile: "640x480x30"
+    # After extensive testing on Pi5 + D435i, this is the config that keeps
+    # BOTH depth and color streaming simultaneously:
+    #   - Depth 640x480x15 (down from native 848x480): 800→600 KB/frame
+    #     reduces Pi5 CPU pressure in the driver→DDS serialization path.
+    #     At 848x480, depth wedges after ~14 frames even though driver
+    #     diagnostics still report "Desired frequency met" — the issue is
+    #     downstream frame drops, not the sensor.
+    #   - Color 424x240x15 (down from 640x480): frees up Pi5 CPU budget
+    #     for the depth stream. 424x240 is still readable in the dashboard
+    #     and plenty for ArUco/YOLO detection.
+    #   - Both at 15 Hz so enable_sync (if re-enabled) would work cleanly.
+    # Rates observed at subscribers: depth ~5 Hz, color ~15 Hz, pointcloud
+    # ~7 Hz. Good enough for voxel_layer (Nav2 reads pointcloud at 5-10 Hz
+    # typically).
+    depth_module.depth_profile: "640x480x15"
+    rgb_camera.color_profile: "424x240x15"
 
     # --- Point cloud (Pi5 / aarch64 → NEON namespace) ---
     pointcloud__neon_.enable: true
@@ -51,7 +66,7 @@
     pointcloud__neon_.ordered_pc: false
     pointcloud__neon_.allow_no_texture_points: false
 
-    # Align depth to color so pointcloud has RGB and uses color intrinsics.
+    # Align depth to color so pointcloud has RGB + uses color intrinsics.
     align_depth.enable: true
 
     # --- Filters (post-processing) ---
