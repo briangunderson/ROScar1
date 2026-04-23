@@ -389,6 +389,13 @@
   show it again until a mode/quality/resolution change tears down the
   stream. Dead streams show the last frame (which is fine — strictly
   better than a flickering OFFLINE/black cycle).
+- **Motor wire color codes (keep forever)**: Purple=M1=Front Left,
+  Orange=M2=Rear Left, Yellow=M3=Front Right, Green=M4=Rear Right.
+  Same table is in CLAUDE.md under Hardware Orientation. Reach for this
+  any time you're tracing a loose wire, re-terminating a connector, or
+  wondering which port a motor should be plugged into — the mecanum
+  kinematics on the STM32 assume this exact mapping and any swap
+  produces wrong-direction wheels.
 - **realsense2_camera silent depth-stream wedge on Pi5 when depth +
   color BOTH run at native resolutions.** Driver diagnostics show
   `camera: depth` → "Events since startup: 14, Actual frequency: 0,

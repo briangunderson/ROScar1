@@ -692,6 +692,20 @@ The board is mounted 180-deg rotated on the chassis. Motor wiring has been physi
 corrected so all 4 motor ports match their board labels (M1=FL, M2=RL, M3=FR, M4=RR)
 with correct polarity (+PWM = forward). No motor command or odometry sign corrections needed.
 
+### Motor Wire Color Codes (DO NOT LOSE)
+Physical cable colors → motor ports on the YB-ERF01-V3.0. Use these any time
+you re-terminate a connector, trace a loose wire, or re-route after chassis work.
+
+| Wire color | Port | Position       |
+|-----------|------|----------------|
+| Purple    | M1   | Front Left     |
+| Orange    | M2   | Rear Left      |
+| Yellow    | M3   | Front Right    |
+| Green     | M4   | Rear Right     |
+
+Mnemonic: **P.O.Y.G.** (P-O-Y-G) from front-left around the chassis counter-clockwise
+(front-left → rear-left → front-right → rear-right), matching M1→M2→M3→M4.
+
 IMU/magnetometer sensors are still on the rotated board and need software correction:
 
 | Data | Correction |
