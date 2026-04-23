@@ -73,5 +73,12 @@
 
     # --- Misc ---
     publish_tf: false         # URDF owns the TF tree for the D435i's internal frames
-    initial_reset: false
+    # initial_reset: true forces the D435i firmware to reset when the driver
+    # starts. This adds ~2s to launch but recovers from the known "Asic
+    # Temperature value is not valid!" wedge state that silently kills the
+    # depth stream (color survives, pointcloud goes dead). If you see
+    # repeated ASIC-temp errors in journalctl, the wedge has recurred and
+    # a physical USB unplug is probably needed; initial_reset covers most
+    # normal restart cases.
+    initial_reset: true
     diagnostics_period: 1.0

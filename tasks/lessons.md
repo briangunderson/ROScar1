@@ -318,3 +318,51 @@
   went offline. Removed from canonical `cv.launch.py`. If the WSL2 source
   tree diverges (you added nodes there that aren't in the canonical repo),
   they can re-appear; sync Windows → WSL2 after every canonical change.
+- **`<img>.onerror` is NOT a reliable "MJPEG stream is dead" signal in
+  Chrome.** Transient multipart-boundary glitches trip onerror repeatedly
+  even on a healthy stream. `<img>.onload` fires exactly ONCE per
+  `<img>.src` assignment (initial decode), not per-frame. So you can't
+  build a "stream alive" watchdog from either event. The AIO camera panel
+  previously flipped the OFFLINE overlay on every onerror → 3s retry
+  reconnect → brief frame → onerror again → flicker. Fix: show OFFLINE
+  until first onload, hide forever after, ignore onerror. If the stream
+  genuinely dies the browser keeps showing the last frame, which is
+  strictly better than a flickering black↔OFFLINE cycle. For a proper
+  "stream is live" signal use a canvas + `drawImage` loop and sample for
+  change, or poll `/snapshot` — both overkill for a status panel.
+- **Don't tie the MJPEG camera to the rosbridge 'connected' event.** The
+  browser's MJPEG `<img>` is plain HTTP from `web_video_server`. It has
+  no dependency on rosbridge. If initCamera only calls startStream inside
+  the rosbridge onConnect callback, a rosbridge hiccup leaves the panel
+  stuck OFFLINE even though the stream is serving fine.
+- **ES module TDZ on `let` in circular imports on Chrome** (Pi5 + Chrome
+  139 observed). Pattern: `aio-app.js` imports `aio-teleop.js`, which
+  imports back `aio-app.js`. A module-scope `let foo = null;` in
+  aio-teleop.js threw "Cannot access 'foo' before initialization" at
+  the first assignment inside `export function initTeleop()` — even
+  though the let statement is lexically before the function and should
+  have run first. Switching `let foo = null` → `var foo = null` hoists
+  the binding to the module's start (as `undefined`) and dodges TDZ
+  entirely. Semantics are the same for subsequent reads/writes. Worth
+  reaching for if you hit an otherwise-unexplainable TDZ in a module
+  with circular imports.
+- **realsense2_camera D435i on Pi5: `ERROR [ds-options.cpp:93] Asic
+  Temperature value is not valid!`** repeating once per second → depth
+  topics (`/camera/camera/depth/image_rect_raw`, `/camera/camera/depth/
+  color/points`) have publishers but never deliver a message. Color
+  stream still works. Seems to coincide with USB instability or D435i
+  firmware state getting wedged mid-session. Workaround: physical
+  unplug/replug of the D435i USB cable (same family as the RPLIDAR
+  `SL_RESULT_OPERATION_TIMEOUT` pattern). Software resets don't recover
+  it. Verify with `sudo journalctl -u roscar-web --since '2 min ago' |
+  grep -i asic`.
+- **launch_manager `/web/set_mode idle` does NOT survive systemd restart
+  in a useful way.** If you restart `roscar-web.service`, the child
+  `ros2 launch` subprocess (the robot stack) is killed via cgroup by
+  systemd, but the launch_manager starts fresh in `idle` mode instead
+  of remembering the last mode. That's why the dashboard shows "IDLE"
+  and the robot stack is gone after a service restart — not a bug in
+  the stack, just how the service lifecycle works. Workaround: the
+  dashboard's mode-sync poll will correct the UI, and the user can
+  click SLAM again. A persistent-mode feature would need to write the
+  last mode to disk.
