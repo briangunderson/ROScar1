@@ -42,20 +42,14 @@
     # Depth 15 Hz keeps Pi5 CPU manageable with decimation + temporal filters.
     # Color 30 Hz since it's the only camera now (replaces Logitech) — the
     # dashboard, ArUco, and YOLO all prefer 30 FPS and USB 3.0 has headroom.
-    # After extensive testing on Pi5 + D435i, this is the config that keeps
-    # BOTH depth and color streaming simultaneously:
-    #   - Depth 640x480x15 (down from native 848x480): 800→600 KB/frame
-    #     reduces Pi5 CPU pressure in the driver→DDS serialization path.
-    #     At 848x480, depth wedges after ~14 frames even though driver
-    #     diagnostics still report "Desired frequency met" — the issue is
-    #     downstream frame drops, not the sensor.
-    #   - Color 424x240x15 (down from 640x480): frees up Pi5 CPU budget
-    #     for the depth stream. 424x240 is still readable in the dashboard
-    #     and plenty for ArUco/YOLO detection.
-    #   - Both at 15 Hz so enable_sync (if re-enabled) would work cleanly.
-    # Rates observed at subscribers: depth ~5 Hz, color ~15 Hz, pointcloud
-    # ~7 Hz. Good enough for voxel_layer (Nav2 reads pointcloud at 5-10 Hz
-    # typically).
+    # Pi5 + D435i known-good: depth 640x480x15 + color 424x240x15.
+    # Both at 640x480 wedges depth silently (driver diagnostics:
+    # "Events since startup: ~9, Actual frequency: 0"). This is NOT a
+    # CPU-load issue (I confirmed after halving CPU use from the JS
+    # double-init fix) — it's something in the driver→DDS pipeline that
+    # chokes on dual 640x480 streams on this hardware. Smaller color
+    # unblocks depth. 424x240 is still fine for the dashboard, ArUco,
+    # and YOLO — all upscale cleanly to the browser's display size.
     depth_module.depth_profile: "640x480x15"
     rgb_camera.color_profile: "424x240x15"
 

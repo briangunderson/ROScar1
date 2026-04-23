@@ -366,3 +366,39 @@
   dashboard's mode-sync poll will correct the UI, and the user can
   click SLAM again. A persistent-mode feature would need to write the
   last mode to disk.
+- **ES modules + `?v=...` cache-bust is a TRAP if children import the
+  bare module name.** Adding `js/aio-app.js?v=2026-04-23` on the
+  `<script type="module">` tag and having child modules import
+  `./aio-app.js` (no query) creates TWO distinct module URLs and
+  Chrome evaluates the whole graph twice. Every `init*` at module
+  top-level runs twice, every `addEventListener` attaches twice, every
+  rosbridge subscription is doubled. User-visible: click handlers
+  appear to do nothing because the second handler immediately undoes
+  the first. Fix: don't put `?v=` on the script tag if children use
+  bare imports. Rely on `Cache-Control: no-store` headers (which
+  `http_server_node.py` now sends on every response) + Ctrl+Shift+R
+  when a stale asset really needs bypassing. If you NEED a cache-bust,
+  either (a) version-stamp EVERY import across every module, or
+  (b) rename the files.
+- **`<img>.onerror` is NOT a reliable "MJPEG stream is dead" signal in
+  Chrome** (full rule — see the earlier AIO camera entry). Paired
+  lesson: the watchdog-based design I tried first (check staleness by
+  observing `onload` timestamps) also doesn't work because `onload`
+  fires ONCE per `src` assignment on MJPEG streams, not per frame.
+  Pragmatic policy is: hide OFFLINE overlay on first `onload`, never
+  show it again until a mode/quality/resolution change tears down the
+  stream. Dead streams show the last frame (which is fine — strictly
+  better than a flickering OFFLINE/black cycle).
+- **realsense2_camera silent depth-stream wedge on Pi5 when depth +
+  color BOTH run at native resolutions.** Driver diagnostics show
+  `camera: depth` → "Events since startup: 14, Actual frequency: 0,
+  message: No events recorded" while `camera: color` stays at target
+  — i.e. the sensor is producing depth frames internally but they're
+  not reaching DDS subscribers. Isolated by disabling color: depth
+  streams perfectly at 14.97 Hz alone. On this Pi5 + D435i combo the
+  working compromise is depth at 640×480×15 + color at 424×240×15 +
+  `enable_sync: false`. Depth then reaches subscribers at ~5 Hz (not
+  the internal 15 Hz — downstream frame drops somewhere in the
+  driver→DDS path) with pointcloud at ~9 Hz. Good enough for the
+  Nav2 voxel_layer. Also `initial_reset: true` cleared an earlier
+  "Asic Temperature value is not valid!" wedge and is a good default.
