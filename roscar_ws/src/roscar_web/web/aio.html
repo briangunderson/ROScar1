@@ -321,8 +321,13 @@
   <!-- ═══════════════════ SCRIPTS ═══════════════════ -->
   <script src="js/lib/roslib.min.js"></script>
   <script src="js/lib/nipplejs.min.js"></script>
-  <!-- Version-bust on every aio.html update so browsers fetch fresh JS.
-       Bump the number below whenever shipping new JS modules. -->
-  <script type="module" src="js/aio-app.js?v=2026-04-23-cam-autostart"></script>
+  <!-- NOTE: do NOT add a ?v=... cache-bust to this script tag. Child
+       modules import ./aio-app.js without the query, so Chrome sees
+       two distinct module URLs and evaluates the entire graph twice —
+       every init* function fires twice, every click handler is
+       attached twice, etc. The no-cache HTTP headers from http_server
+       are sufficient; a Ctrl+Shift+R after JS changes picks up fresh
+       bytes without the duplicate-evaluation bug. -->
+  <script type="module" src="js/aio-app.js"></script>
 </body>
 </html>
