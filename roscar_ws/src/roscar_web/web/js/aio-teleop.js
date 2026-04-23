@@ -19,7 +19,13 @@ const joyR = { vx: 0, wz: 0 };           // right joystick: drive + rotate
 const keys = { vx: 0, vy: 0, wz: 0 };
 const pad = { vx: 0, vy: 0, wz: 0 };
 
-let getPub = null;
+// Declared as `var` (not `let`) to sidestep a Chrome TDZ bug we hit in prod:
+// chain aio-app.js <-> aio-teleop.js is a circular ES-module import, and the
+// combination of circular import + `let` + direct-assignment on line 1 of
+// initTeleop intermittently throws "Cannot access 'getPub' before
+// initialization". `var` hoists to the top of the module scope so the
+// binding exists (as undefined) from module-start, dodging TDZ entirely.
+var getPub = null;
 let activeSource = 'KB';  // 'KB', 'JOY', 'PAD'
 
 const DEADZONE = 0.15;

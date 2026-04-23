@@ -1,37 +1,56 @@
 /**
  * aio-camera.js — MJPEG stream panel (always active)
  * Uses a plain <img> tag; web_video_server provides the stream URL.
+ *
+ * Design note on OFFLINE detection:
+ *   Chrome fires `<img>.onload` ONCE for MJPEG streams (on the initial frame
+ *   decode), not per-frame. And `.onerror` fires spuriously on transient
+ *   multipart boundary glitches. Neither is a reliable "stream alive" signal
+ *   for `<img>`. So this module uses the simplest possible UI policy:
+ *     - Show OFFLINE overlay until the first frame decodes.
+ *     - Hide overlay forever after the first frame.
+ *     - Ignore onerror (MJPEG streams trip it routinely even when healthy).
+ *     - On genuine connection loss, the browser keeps displaying the last
+ *       frame rather than clearing the element; a visibly-stale image is
+ *       strictly better than a flickering OFFLINE/black cycle.
+ *   If the stream needs to be rebuilt (mode/quality/resolution change, or
+ *   after 10s+ where the connection was obviously dropped and the user
+ *   expects refresh), startStream() reassigns img.src which kicks off a
+ *   fresh connection and a fresh onload.
  */
 
 import { HOST, PORTS, CV_HOST, CV_PORT, onAppEvent, toast } from './aio-app.js';
 
 let quality    = 80;
 let resolution = '640x480';
-let streaming  = false;
+let topic      = '/image_raw';
+let cvMode     = false;
+let haveFrame  = false;   // set true once the first frame decoded
+let currentUrl = '';      // last URL we assigned to img.src
 
-let topic = '/image_raw';
-let cvMode = false;  // true when showing annotated feed from CV server
 const PANEL = '#panel-camera';
-const RETRY_INTERVAL = 3000; // ms — retry stream when offline
-
-let retryTimer = null;
 
 export function initCamera() {
   setupControls();
+  // The MJPEG stream is served by web_video_server over plain HTTP — it
+  // does NOT depend on rosbridge being connected. Start the stream
+  // unconditionally on init so the feed comes up even if rosbridge is
+  // still negotiating or has hit a transient error.
+  startStream();
   onAppEvent((ev) => {
-    if (ev === 'connected') startStream();
+    // If we never got a first frame (e.g. robot stack wasn't running yet
+    // when we started), retry once we're connected to rosbridge — by that
+    // point the robot nodes are almost always up.
+    if (ev === 'connected' && !haveFrame) startStream();
   });
   // CV feed toggle: switch between /image_raw and /image_annotated
   window.addEventListener('cv-feed-change', (e) => {
     cvMode = e.detail.annotated;
-    topic = cvMode ? '/image_annotated' : '/image_raw';
+    topic  = cvMode ? '/image_annotated' : '/image_raw';
+    // URL changes → need a fresh connection
+    haveFrame = false;
     startStream();
   });
-  // Periodic retry: when the stream is down (e.g. camera node not yet
-  // running after a mode switch), re-attempt every few seconds.
-  retryTimer = setInterval(() => {
-    if (!streaming) startStream();
-  }, RETRY_INTERVAL);
 }
 
 // ── Build stream URL ───────────────────────────────────────────────────────
@@ -44,38 +63,31 @@ function streamUrl() {
     `topic=${topic}&quality=${quality}&width=${w}&height=${h}&type=mjpeg`;
 }
 
-// ── Start / Stop ───────────────────────────────────────────────────────────
-let streamTimeout = null;
-
+// ── Start / Restart stream ─────────────────────────────────────────────────
 function startStream() {
   const img     = document.querySelector(`${PANEL} #camera-img`);
   const overlay = document.querySelector(`${PANEL} #camera-overlay`);
   if (!img || !overlay) return;
 
-  clearTimeout(streamTimeout);
+  const url = streamUrl();
 
+  // Hook up handlers (idempotent — setting .onload replaces any prior).
   img.onload = () => {
-    clearTimeout(streamTimeout);
+    haveFrame = true;
     overlay.style.display = 'none';
-    streaming = true;
   };
   img.onerror = () => {
-    clearTimeout(streamTimeout);
-    overlay.style.display = '';
-    streaming = false;
+    // Transient MJPEG framing issues trip this even on healthy streams.
+    // Stay silent; don't revert to OFFLINE.
   };
 
-  // Force the browser to re-request by busting any cached failed response
-  img.src = '';
-  img.src = streamUrl();
-  overlay.style.display = 'none'; // optimistic hide
-
-  // If no frame arrives within 5s, show offline overlay
-  streamTimeout = setTimeout(() => {
-    if (!streaming) {
-      overlay.style.display = '';
-    }
-  }, 5000);
+  // Skip reconnect if URL unchanged and we've already got a frame — otherwise
+  // the stream would be torn down + rebuilt on every settings change that
+  // didn't actually change the URL.
+  if (img.src === url && haveFrame) return;
+  currentUrl = url;
+  img.src = '';   // abort any pending request
+  img.src = url;  // start fresh stream
 }
 
 // ── Controls ───────────────────────────────────────────────────────────────
@@ -86,6 +98,7 @@ function setupControls() {
       document.querySelectorAll(`${PANEL} [data-quality]`).forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       quality = parseInt(btn.dataset.quality, 10);
+      haveFrame = false;  // URL changed → wait for new first frame
       startStream();
     });
   });
@@ -96,6 +109,7 @@ function setupControls() {
       document.querySelectorAll(`${PANEL} [data-res]`).forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       resolution = btn.dataset.res;
+      haveFrame = false;
       startStream();
     });
   });
