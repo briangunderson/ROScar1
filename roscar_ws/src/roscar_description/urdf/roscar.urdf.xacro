@@ -1,31 +1,55 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="roscar">
 
-  <!-- ==================== Robot Dimensions ==================== -->
-  <!-- MEASURED 2026-03-16 with calipers and tape measure            -->
-  <xacro:property name="chassis_length" value="0.200"/>   <!-- m, front-to-back (body, not incl wheel protrusion) -->
-  <xacro:property name="chassis_width" value="0.170"/>    <!-- m, left-to-right (body between wheels) -->
-  <xacro:property name="chassis_height" value="0.060"/>   <!-- m, plate/board stack thickness -->
-  <xacro:property name="chassis_z_offset" value="0.0205"/> <!-- m, ground to bottom of chassis (measured) -->
+  <!-- Include D435i macro from realsense2_description -->
+  <xacro:include filename="$(find realsense2_description)/urdf/_d435i.urdf.xacro"/>
 
-  <xacro:property name="wheel_radius" value="0.0397"/>    <!-- m, 79.3mm dia across mecanum rollers -->
-  <xacro:property name="wheel_width" value="0.0373"/>     <!-- m, hub face to face incl rollers -->
+  <!-- ==================== Coordinate Convention ==================== -->
+  <!-- base_link: +X = camera mast direction (operator forward), +Y = left,    -->
+  <!-- +Z = up (REP 103). Driver runs no vx/vy negation in this state — motor  -->
+  <!-- wiring matches firmware labels and base_link aligns with the firmware   -->
+  <!-- chassis frame.                                                          -->
 
-  <!-- Half-distances from center to wheel axes -->
-  <xacro:property name="wheel_x_offset" value="0.0483"/>  <!-- m, half of 96.55mm wheelbase -->
-  <xacro:property name="wheel_y_offset" value="0.1025"/>  <!-- m, half of 205mm track width -->
+  <!-- ==================== Robot Dimensions (Chassis v2 — extrusion) ============ -->
+  <!-- ESTIMATES from photos 2026-04-27. TODO: remeasure with calipers/tape:    -->
+  <!--   wheelbase, track, mast_x, mast_height, d435i_z, lidar_z.               -->
+  <xacro:property name="chassis_length" value="0.220"/>   <!-- ESTIMATE -->
+  <xacro:property name="chassis_width"  value="0.220"/>   <!-- ESTIMATE -->
+  <xacro:property name="chassis_height" value="0.080"/>   <!-- ESTIMATE: extrusion stack -->
+  <xacro:property name="chassis_z_offset" value="0.0205"/> <!-- ground to bottom of frame -->
 
-  <!-- Camera position (relative to base_link) — TODO: measure precisely -->
-  <xacro:property name="camera_x" value="0.12"/>
-  <xacro:property name="camera_z" value="0.10"/>
+  <xacro:property name="wheel_radius" value="0.0397"/>    <!-- 79.3mm dia mecanum -->
+  <xacro:property name="wheel_width"  value="0.0373"/>
 
-  <!-- Lidar position (relative to base_link) — TODO: measure precisely -->
-  <xacro:property name="lidar_x" value="0.0"/>
-  <xacro:property name="lidar_z" value="0.09"/>  <!-- scan plane ~18cm from floor -->
+  <!-- Half-distances from chassis center to wheel hubs.                       -->
+  <!-- ESTIMATE — please measure: hub-to-hub fore/aft = 2*wheel_x_offset,      -->
+  <!-- hub-to-hub left/right = 2*wheel_y_offset.                                -->
+  <xacro:property name="wheel_x_offset" value="0.085"/>   <!-- ESTIMATE: half wheelbase ~170mm -->
+  <xacro:property name="wheel_y_offset" value="0.110"/>   <!-- ESTIMATE: half track ~220mm -->
+
+  <!-- Mast (3030 extrusion column at front of chassis, holds lidar + camera) -->
+  <xacro:property name="mast_x"        value="0.090"/>    <!-- ESTIMATE: forward of base_link center -->
+  <xacro:property name="mast_height"   value="0.220"/>    <!-- ESTIMATE: column length above chassis top -->
+  <xacro:property name="mast_section"  value="0.030"/>    <!-- 30mm extrusion -->
+
+  <!-- D435i camera mounted on the front face of the mast, looking +X.        -->
+  <!-- ESTIMATE — please measure ground to camera optical-center height.       -->
+  <xacro:property name="d435i_x"     value="${mast_x + mast_section/2}"/>
+  <xacro:property name="d435i_y"     value="0.0"/>
+  <xacro:property name="d435i_z"     value="0.150"/>      <!-- ESTIMATE: above base_link -->
+  <xacro:property name="d435i_pitch" value="0.0"/>        <!-- horizontal -->
+
+  <!-- Lidar sits on top of the mast.                                          -->
+  <!-- ESTIMATE — please measure ground to scan-plane height.                  -->
+  <xacro:property name="lidar_x" value="${mast_x}"/>
+  <xacro:property name="lidar_z" value="${mast_height + 0.015}"/>  <!-- mast top + ~15mm to scan plane -->
 
   <!-- ==================== Materials ==================== -->
   <material name="dark_grey">
     <color rgba="0.3 0.3 0.3 1.0"/>
+  </material>
+  <material name="roscar_aluminum">
+    <color rgba="0.75 0.75 0.78 1.0"/>
   </material>
   <material name="black">
     <color rgba="0.1 0.1 0.1 1.0"/>
@@ -35,7 +59,6 @@
   </material>
 
   <!-- ==================== Base Footprint ==================== -->
-  <!-- Virtual frame on the ground plane, directly below base_link -->
   <link name="base_footprint"/>
 
   <joint name="base_footprint_joint" type="fixed">
@@ -58,10 +81,27 @@
       </geometry>
     </collision>
     <inertial>
-      <mass value="2.2"/>  <!-- measured total 2200g, minus ~400g for 4 wheels -->
-      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/>
+      <mass value="3.5"/>  <!-- ESTIMATE: extrusion frame ~3-4kg total -->
+      <inertia ixx="0.02" ixy="0" ixz="0" iyy="0.02" iyz="0" izz="0.02"/>
     </inertial>
   </link>
+
+  <!-- ==================== Camera Mast (3030 extrusion column) ============== -->
+  <link name="mast_link">
+    <visual>
+      <origin xyz="0 0 ${mast_height/2}" rpy="0 0 0"/>
+      <geometry>
+        <box size="${mast_section} ${mast_section} ${mast_height}"/>
+      </geometry>
+      <material name="roscar_aluminum"/>
+    </visual>
+  </link>
+
+  <joint name="mast_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="mast_link"/>
+    <origin xyz="${mast_x} 0 ${chassis_height/2}" rpy="0 0 0"/>
+  </joint>
 
   <!-- ==================== Wheel Macro ==================== -->
   <xacro:macro name="mecanum_wheel" params="name x_pos y_pos">
@@ -109,36 +149,21 @@
     <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
 
-  <!-- ==================== Camera Link ==================== -->
-  <link name="camera_link">
-    <visual>
-      <geometry>
-        <box size="0.03 0.08 0.03"/>
-      </geometry>
-      <material name="blue"/>
-    </visual>
-  </link>
+  <!-- ==================== D435i Depth Camera (mounted on mast) ============== -->
+  <!-- realsense2_description's sensor_d435i macro creates camera_link plus    -->
+  <!-- depth/color/IR child frames and their _optical variants. Parented to    -->
+  <!-- base_link at the mount pose; the macro handles internal extrinsics.     -->
+  <xacro:sensor_d435i parent="base_link" name="camera" use_nominal_extrinsics="true">
+    <origin xyz="${d435i_x} ${d435i_y} ${d435i_z}" rpy="0 ${d435i_pitch} 0"/>
+  </xacro:sensor_d435i>
 
-  <joint name="camera_joint" type="fixed">
-    <parent link="base_link"/>
-    <child link="camera_link"/>
-    <origin xyz="${camera_x} 0 ${camera_z}" rpy="0 0 0"/>
-  </joint>
-
-  <!-- Optical frame: z forward, x right, y down (REP 103) -->
-  <link name="camera_optical_frame"/>
-
-  <joint name="camera_optical_joint" type="fixed">
-    <parent link="camera_link"/>
-    <child link="camera_optical_frame"/>
-    <origin xyz="0 0 0" rpy="${-pi/2} 0 ${-pi/2}"/>
-  </joint>
-
-  <!-- ==================== Lidar Link (RPLIDAR C1) ==================== -->
+  <!-- ==================== Lidar Link (RPLIDAR C1, on top of mast) ========== -->
+  <!-- yaw=0: assumes the lidar's 0 deg marker points +X (toward camera direction). -->
+  <!-- If obstacles in front of the robot show up at -X in /scan, change to pi.     -->
   <link name="laser">
     <visual>
       <geometry>
-        <cylinder radius="0.035" length="0.025"/>
+        <cylinder radius="0.035" length="0.040"/>
       </geometry>
       <material name="blue"/>
     </visual>
@@ -147,7 +172,7 @@
   <joint name="lidar_joint" type="fixed">
     <parent link="base_link"/>
     <child link="laser"/>
-    <origin xyz="${lidar_x} 0 ${lidar_z}" rpy="0 0 ${pi}"/>
+    <origin xyz="${lidar_x} 0 ${lidar_z}" rpy="0 0 0"/>
   </joint>
 
 </robot>
