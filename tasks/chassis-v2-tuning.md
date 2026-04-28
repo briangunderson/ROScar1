@@ -95,7 +95,7 @@ Multiple contributors, ranked by evidence:
 | 7 | Tape-measure `mast_x` (currently estimate of 0.090 m) | Pending |
 | 8 | Tape-measure ground→camera optical center and ground→lidar scan plane | Pending — only matters for RViz aesthetics + depth-pointcloud world projection |
 | 9 | Re-enable wheel `vyaw` fusion in EKF after host FK is sign-verified | **Done 2026-04-28** |
-| 10 | Sign-verify host FK | **Done 2026-04-28** for forward; strafe and yaw signs to be confirmed via dashboard driving |
+| 10 | Sign-verify host FK | **Done 2026-04-28** — user confirmed during dashboard driving: cleanest map yet, no arrow snap-back, walls solid |
 | 11 | Optionally raise `minimum_travel_distance` back to 0.1 m now that wheel motion is trustworthy again | Pending — current time-triggered mode (0, 0, 0.2 s) is fine |
 
 ## Sign conventions cheat sheet
