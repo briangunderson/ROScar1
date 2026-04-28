@@ -57,6 +57,10 @@ class LaunchManagerNode(Node):
 
     def _set_mode_callback(self, request, response):
         mode = request.mode.strip()
+        self.get_logger().info(
+            f'set_mode request received: mode={mode!r} '
+            f'map_path={request.map_path!r} use_depth={request.use_depth}'
+        )
 
         if mode not in AVAILABLE_MODES:
             response.success = False
@@ -80,6 +84,10 @@ class LaunchManagerNode(Node):
                     response.message = 'map_path required for navigation mode'
                     return response
                 cmd.append(f'map:={map_path}')
+
+            # Forward use_depth to any mode — all four parent launch files
+            # (teleop=robot, slam, navigation, slam_nav) declare the arg.
+            cmd.append(f'use_depth:={"true" if request.use_depth else "false"}')
 
         # Stop current launch
         self._stop_current()
@@ -127,6 +135,28 @@ class LaunchManagerNode(Node):
                 response.path = map_path + '.yaml'
                 response.message = f'Map saved to {map_path}.yaml'
                 self.get_logger().info(f'Map saved: {map_path}')
+                # Snapshot the live learned-markers file (if any) into a
+                # per-map sidecar. navigation.launch.py reads
+                # <map_path>.markers.yaml when this map is loaded for nav.
+                # Without this snapshot, markers learned during slam_nav
+                # would either be lost on relaunch or contaminate other
+                # maps via the shared global file.
+                live_markers = os.path.expanduser('~/roscar_ws/learned_markers.yaml')
+                sidecar = map_path + '.markers.yaml'
+                try:
+                    if os.path.exists(live_markers):
+                        import shutil
+                        shutil.copy2(live_markers, sidecar)
+                        self.get_logger().info(f'Markers snapshot saved: {sidecar}')
+                    else:
+                        # No markers learned this session — write an empty
+                        # sidecar so nav can't accidentally load a leftover
+                        # from an older session under the same map name.
+                        with open(sidecar, 'w') as f:
+                            f.write('{}\n')
+                        self.get_logger().info(f'No live markers; wrote empty sidecar {sidecar}')
+                except Exception as e:
+                    self.get_logger().warn(f'Failed to snapshot markers sidecar: {e}')
             else:
                 response.success = False
                 response.path = ''

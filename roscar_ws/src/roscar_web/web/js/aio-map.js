@@ -34,6 +34,14 @@ let navGoalMode = false;
 let goalActionClient = null;
 let goalHandle      = null;
 
+// AMCL initial-pose seeding: when initPoseMode is true, a click publishes
+// to /initialpose instead of sending a nav goal. Click-and-drag sets
+// orientation (drag direction = robot heading). Mutually exclusive with
+// navGoalMode.
+let initPoseMode = false;
+let initialPoseTopic = null;
+let initPoseDrag = null;  // {x0, y0, x1, y1} canvas coords during drag
+
 // Landmark markers from /landmark/known_markers
 let landmarkSub = null;
 let knownMarkers = [];  // [{id, x, y, yaw, visible}]
@@ -169,6 +177,14 @@ function setupGoalClient() {
   goalActionClient = new ROSLIB.ActionClient({
     ros, serverName: '/navigate_to_pose',
     actionName: 'nav2_msgs/action/NavigateToPose',
+  });
+}
+
+function setupInitialPoseTopic() {
+  const ros = getRos(); if (!ros) return;
+  initialPoseTopic = new ROSLIB.Topic({
+    ros, name: '/initialpose',
+    messageType: 'geometry_msgs/PoseWithCovarianceStamped',
   });
 }
 
@@ -315,6 +331,37 @@ function drawMap() {
     } else {
       drawLandmarks(ctx);
     }
+  }
+
+  // Init-pose drag indicator (arrow from click point to current cursor)
+  if (initPoseDrag) {
+    const { x0, y0, x1, y1 } = initPoseDrag;
+    const dlen = Math.hypot(x1 - x0, y1 - y0);
+    ctx.save();
+    ctx.strokeStyle = '#00ffaa';
+    ctx.fillStyle   = '#00ffaa';
+    ctx.lineWidth   = 2;
+    // Origin dot
+    ctx.beginPath();
+    ctx.arc(x0, y0, 6, 0, Math.PI * 2);
+    ctx.fill();
+    if (dlen >= 10) {
+      // Arrow shaft
+      ctx.beginPath();
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
+      ctx.stroke();
+      // Arrowhead
+      const a = Math.atan2(y1 - y0, x1 - x0);
+      const ah = 12;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x1 - ah * Math.cos(a - 0.4), y1 - ah * Math.sin(a - 0.4));
+      ctx.lineTo(x1 - ah * Math.cos(a + 0.4), y1 - ah * Math.sin(a + 0.4));
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
   }
 }
 
@@ -501,24 +548,65 @@ function setupControls() {
   });
   document.getElementById('map-lock').addEventListener('click', toggleLock);
   document.getElementById('cancel-goal-btn').addEventListener('click', cancelGoal);
+  const initBtn = document.getElementById('map-init-pose');
+  if (initBtn) initBtn.addEventListener('click', () => setInitPoseMode(!initPoseMode));
 
   const c = getCanvas();
   if (!c) return;
 
-  // Pan via drag (disabled when locked)
+  // Pan via drag (disabled when locked or in init-pose mode)
   c.addEventListener('mousedown', (e) => {
+    if (initPoseMode || e.shiftKey) {
+      // Begin init-pose drag (release will publish with drag-direction yaw)
+      const rect = c.getBoundingClientRect();
+      initPoseDrag = {
+        x0: e.clientX - rect.left, y0: e.clientY - rect.top,
+        x1: e.clientX - rect.left, y1: e.clientY - rect.top,
+        shiftStart: e.shiftKey,
+      };
+      needsDraw = true;
+      return;
+    }
     if (navGoalMode || robotLocked) return;
     dragging = true;
     dragStart = { x: e.clientX, y: e.clientY, ox: viewOffset.x, oy: viewOffset.y };
   });
   c.addEventListener('mousemove', (e) => {
+    if (initPoseDrag) {
+      const rect = c.getBoundingClientRect();
+      initPoseDrag.x1 = e.clientX - rect.left;
+      initPoseDrag.y1 = e.clientY - rect.top;
+      needsDraw = true;
+      return;
+    }
     if (!dragging) return;
     viewOffset.x = dragStart.ox + (e.clientX - dragStart.x);
     viewOffset.y = dragStart.oy + (e.clientY - dragStart.y);
     needsDraw = true;
   });
-  c.addEventListener('mouseup', () => { dragging = false; });
-  c.addEventListener('mouseleave', () => { dragging = false; });
+  c.addEventListener('mouseup', (e) => {
+    if (initPoseDrag) {
+      const dx = initPoseDrag.x1 - initPoseDrag.x0;
+      const dy = initPoseDrag.y1 - initPoseDrag.y0;
+      const dragLen = Math.hypot(dx, dy);
+      // Below ~10 px we treat as a plain click (use current robot yaw).
+      if (dragLen < 10) {
+        sendInitialPose(initPoseDrag.x0, initPoseDrag.y0);
+      } else {
+        sendInitialPoseDrag(initPoseDrag.x0, initPoseDrag.y0,
+                             initPoseDrag.x1, initPoseDrag.y1);
+      }
+      initPoseDrag = null;
+      needsDraw = true;
+      return;
+    }
+    dragging = false;
+  });
+  c.addEventListener('mouseleave', () => {
+    initPoseDrag = null;
+    dragging = false;
+    needsDraw = true;
+  });
 
   // Touch pan (disabled when locked)
   let touchStart = null;
@@ -546,13 +634,13 @@ function setupControls() {
     zoomAtPoint(factor, cx, cy);
   }, { passive: false });
 
-  // Nav goal on click
+  // Nav goal on click (init-pose handled by mousedown/move/up for drag-yaw)
   c.addEventListener('click', (e) => {
-    if (!navGoalMode || !mapData) return;
-    const rect = c.getBoundingClientRect();
-    const cx = e.clientX - rect.left;
-    const cy = e.clientY - rect.top;
-    sendNavGoal(cx, cy);
+    if (!mapData || initPoseMode || e.shiftKey) return;
+    if (navGoalMode) {
+      const rect = c.getBoundingClientRect();
+      sendNavGoal(e.clientX - rect.left, e.clientY - rect.top);
+    }
   });
 }
 
@@ -617,20 +705,105 @@ function cancelGoal() {
 function setNavGoalMode(on) {
   navGoalMode = on;
   if (on && !goalActionClient) setupGoalClient();
+  // Mutually exclusive with init-pose mode
+  if (on) initPoseMode = false;
   updateGoalUI();
 }
 
-/** Update hint, cancel button visibility, and cursor based on current state. */
+// ── AMCL initial pose ──────────────────────────────────────────────────────
+/** Plain-click init-pose: position only, yaw from current TF (best guess). */
+function sendInitialPose(canvasX, canvasY) {
+  if (!initialPoseTopic) setupInitialPoseTopic();
+  if (!initialPoseTopic || !mapData) { toast('rosbridge not connected', 'err'); return; }
+  const p = canvasToWorld(canvasX, canvasY);
+  const yaw = (robotPos && typeof robotPos.yaw === 'number') ? robotPos.yaw : 0;
+  publishInitialPose(p.x, p.y, yaw);
+  toast(`Initial pose: (${p.x.toFixed(2)}, ${p.y.toFixed(2)}) ` +
+        `yaw=${(yaw * 180 / Math.PI).toFixed(0)}° (from TF — drag to set explicitly)`, 'ok');
+  setInitPoseMode(false);
+}
+
+/** Convert canvas (cx,cy) to world (wx,wy) using the same inverse as sendNavGoal. */
+function canvasToWorld(cx, cy) {
+  let ux = cx, uy = cy;
+  if (robotLocked && robotPos) {
+    const c = getCanvas();
+    const ccx = c.width / 2, ccy = c.height / 2;
+    const dx = cx - ccx, dy = cy - ccy;
+    const cosA = Math.cos(-robotPos.yaw), sinA = Math.sin(-robotPos.yaw);
+    ux = dx * cosA - dy * sinA + ccx;
+    uy = dx * sinA + dy * cosA + ccy;
+  }
+  const mpx = mapData.width  - (uy - viewOffset.y) / viewScale;
+  const mpy = mapData.height - (ux - viewOffset.x) / viewScale;
+  return {
+    x: mapData.origin.x + mpx * mapData.resolution,
+    y: mapData.origin.y + mpy * mapData.resolution,
+  };
+}
+
+/** Click-and-drag init-pose: position from start, yaw from drag direction. */
+function sendInitialPoseDrag(cx0, cy0, cx1, cy1) {
+  if (!initialPoseTopic) setupInitialPoseTopic();
+  if (!initialPoseTopic || !mapData) { toast('rosbridge not connected', 'err'); return; }
+  const p0 = canvasToWorld(cx0, cy0);
+  const p1 = canvasToWorld(cx1, cy1);
+  const yaw = Math.atan2(p1.y - p0.y, p1.x - p0.x);
+  publishInitialPose(p0.x, p0.y, yaw);
+  toast(`Initial pose: (${p0.x.toFixed(2)}, ${p0.y.toFixed(2)}) ` +
+        `yaw=${(yaw * 180 / Math.PI).toFixed(0)}°`, 'ok');
+  setInitPoseMode(false);
+}
+
+/** Shared publish helper. */
+function publishInitialPose(wx, wy, yaw) {
+  const qz = Math.sin(yaw / 2.0);
+  const qw = Math.cos(yaw / 2.0);
+  // Tighter covariance when user explicitly set yaw via drag — give AMCL
+  // less room to wander; loose enough that scan match still refines.
+  const cov = new Array(36).fill(0);
+  cov[0]  = 0.10 * 0.10;
+  cov[7]  = 0.10 * 0.10;
+  cov[35] = (Math.PI / 12) * (Math.PI / 12);
+  initialPoseTopic.publish(new ROSLIB.Message({
+    header: { frame_id: 'map' },
+    pose: {
+      pose: {
+        position: { x: wx, y: wy, z: 0 },
+        orientation: { x: 0, y: 0, z: qz, w: qw },
+      },
+      covariance: cov,
+    },
+  }));
+}
+
+function setInitPoseMode(on) {
+  initPoseMode = on;
+  if (on && !initialPoseTopic) setupInitialPoseTopic();
+  if (on) navGoalMode = false;  // mutually exclusive
+  updateGoalUI();
+}
+
+/** Update hint, cancel button visibility, button states, and cursor. */
 function updateGoalUI() {
   const hint = document.getElementById('nav-goal-hint');
   const btn  = document.getElementById('cancel-goal-btn');
+  const initBtn = document.getElementById('map-init-pose');
   const c    = getCanvas();
-  // Show hint when in goal-picking mode and no active goal
-  if (hint) hint.classList.toggle('hidden', !navGoalMode || goalHandle);
-  // Show cancel button when a goal is active
+  if (hint) {
+    if (initPoseMode) {
+      hint.textContent = 'CLICK + DRAG TO SET INITIAL POSE (drag = robot heading)';
+      hint.classList.remove('hidden');
+    } else if (navGoalMode && !goalHandle) {
+      hint.textContent = 'TAP MAP TO SET GOAL';
+      hint.classList.remove('hidden');
+    } else {
+      hint.classList.add('hidden');
+    }
+  }
   if (btn)  btn.classList.toggle('hidden', !goalHandle);
-  // Crosshair cursor when picking a goal
-  if (c) c.style.cursor = navGoalMode ? 'crosshair' : '';
+  if (initBtn) initBtn.classList.toggle('active', initPoseMode);
+  if (c) c.style.cursor = (navGoalMode || initPoseMode) ? 'crosshair' : '';
 }
 
 function setEl(id, val) {

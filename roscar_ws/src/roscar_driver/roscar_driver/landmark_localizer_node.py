@@ -13,8 +13,8 @@ Supports two modes:
 
 Architecture: Subscribes directly to /aruco/markers (visualization_msgs) from
 the ArUco detector on WSL2. Uses the raw marker pose (in optical frame convention
-from OpenCV's solvePnP) plus local TF chain (map->camera_optical_frame) to compute
-marker position in map frame. The URDF's camera_optical_frame joint handles the
+from OpenCV's solvePnP) plus local TF chain (map->camera_color_optical_frame) to compute
+marker position in map frame. The URDF's camera_color_optical_frame joint handles the
 optical-to-ROS coordinate conversion via its rpy=(-π/2, 0, -π/2) rotation.
 This avoids relying on cross-machine /tf for ArUco frames, which has DDS
 discovery issues with CycloneDDS unicast when many participants are active.
@@ -143,7 +143,7 @@ class LandmarkLocalizerNode(Node):
         self.marker_ids = self.get_parameter('marker_ids').value
         self.velocity_threshold = self.get_parameter('velocity_threshold').value
 
-        # TF — only used for LOCAL transforms (map->camera_optical_frame)
+        # TF — only used for LOCAL transforms (map->camera_color_optical_frame)
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
@@ -154,8 +154,24 @@ class LandmarkLocalizerNode(Node):
         if self.load_learned:
             self._load_learned_markers()
         else:
-            self.get_logger().info(
-                'load_learned=False: starting with empty marker set (SLAM mode)')
+            # SLAM-style session: any prior content of `learned_file` came from
+            # a previous (now-discarded) map frame and would be wrong here.
+            # Truncate so the file reflects ONLY this session's sightings —
+            # important because save_map snapshots this file into a per-map
+            # sidecar, and we don't want to ship stale entries with the
+            # newly-saved map.
+            try:
+                if os.path.exists(self.learned_file):
+                    with open(self.learned_file, 'w') as f:
+                        f.write('{}\n')
+                    self.get_logger().info(
+                        f'load_learned=False: truncated stale marker file {self.learned_file}')
+                else:
+                    self.get_logger().info(
+                        'load_learned=False: starting with empty marker set (SLAM mode)')
+            except Exception as e:
+                self.get_logger().warn(
+                    f'load_learned=False: could not truncate {self.learned_file}: {e}')
 
         # State
         self.last_correction_time = 0.0
@@ -282,14 +298,14 @@ class LandmarkLocalizerNode(Node):
         """Process ArUco marker detections directly from /aruco/markers topic.
 
         Each marker in the array has:
-        - header.frame_id = 'camera_link'
+        - header.frame_id = 'camera_color_optical_frame'
         - id = ArUco marker ID
         - pose = marker pose in OPTICAL frame convention (z=forward, x=right, y=down)
                  (OpenCV's solvePnP always returns in camera/optical convention)
 
         Instead of manually converting optical→camera_link, we use the URDF's
-        camera_optical_frame (which already has the correct rpy=-π/2,0,-π/2
-        rotation relative to camera_link). We look up map→camera_optical_frame
+        camera_color_optical_frame (which already has the correct rpy=-π/2,0,-π/2
+        rotation relative to camera_link). We look up map→camera_color_optical_frame
         and use the raw tvec directly — the TF tree handles the frame rotation.
         """
         if not msg.markers:
@@ -327,18 +343,18 @@ class LandmarkLocalizerNode(Node):
             optical_pose.orientation.z = 0.0
             optical_pose.orientation.w = 1.0
 
-            # Look up LOCAL TF: map -> camera_optical_frame
-            # The URDF defines camera_optical_frame with rpy=(-π/2, 0, -π/2)
+            # Look up LOCAL TF: map -> camera_color_optical_frame
+            # The URDF defines camera_color_optical_frame with rpy=(-π/2, 0, -π/2)
             # relative to camera_link, so the TF tree handles the optical→ROS
             # coordinate conversion automatically.
             try:
                 map_to_optical = self.tf_buffer.lookup_transform(
-                    'map', 'camera_optical_frame', Time(),
+                    'map', 'camera_color_optical_frame', Time(),
                     timeout=rclpy.duration.Duration(seconds=0.1))
             except (tf2_ros.LookupException, tf2_ros.ConnectivityException,
                     tf2_ros.ExtrapolationException) as e:
                 self.get_logger().debug(
-                    f'Marker {marker_id}: map->camera_optical_frame TF failed: {e}')
+                    f'Marker {marker_id}: map->camera_color_optical_frame TF failed: {e}')
                 continue
 
             # Compute map -> marker by chaining: map->optical * optical->marker
