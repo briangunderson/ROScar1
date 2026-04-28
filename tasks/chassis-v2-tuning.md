@@ -89,7 +89,7 @@ Multiple contributors, ranked by evidence:
 | 1 | **STM32 firmware reflash** for correct kinematics | **CANCELLED** — closed-source. Replaced by host-side FK. |
 | 2 | **Mast brace** (3030 + 2 corner brackets, diagonal top-of-mast → chassis edge) | Pending — mechanical, ~15 min |
 | 3 | Nav2 footprint + inflation update | Done |
-| 4 | Validate D435i depth voxel layer in costmap (drive at low table edge, see if it stops) | Pending |
+| 4 | Validate D435i depth voxel layer in costmap | **Partial 2026-04-28**: depth pointcloud is published (10 Hz), local_costmap subscribes, voxel_grid populates, and we observed 125 marked cells contributing to the local costmap on first sample. BUT: after odom drifts (e.g., robot lifted mid-session → wheels free-spin → EKF integrates phantom motion to several meters in odom frame), the local_costmap rejects depth points with "Sensor origin out of map bounds — cannot raytrace" and voxel cell count drops to 0 permanently. Mode restart doesn't reliably restore — costmap appears to cache a stale robot pose. Workaround: restart the whole `roscar-web` systemd service. Real fix needed: investigate why local_costmap doesn't recenter on TF after restart, AND/OR add pickup detection so EKF doesn't integrate phantom motion when robot is off the ground. |
 | 5 | Dashboard "click map → set initial pose" | Pending |
 | 6 | End-to-end landmark localizer test (ArUco markers in a closed loop) | Pending |
 | 7 | Tape-measure `mast_x` (currently estimate of 0.090 m) | Pending |
@@ -97,6 +97,8 @@ Multiple contributors, ranked by evidence:
 | 9 | Re-enable wheel `vyaw` fusion in EKF after host FK is sign-verified | **Done 2026-04-28** |
 | 10 | Sign-verify host FK | **Done 2026-04-28** — user confirmed during dashboard driving: cleanest map yet, no arrow snap-back, walls solid |
 | 11 | Optionally raise `minimum_travel_distance` back to 0.1 m now that wheel motion is trustworthy again | Pending — current time-triggered mode (0, 0, 0.2 s) is fine |
+| 12 | Pickup detection (suppress EKF integration when robot is lifted) — IMU accel/gravity check or wheel-current threshold | New, 2026-04-28. Without this, lifting the robot mid-session corrupts odometry permanently and breaks downstream Nav2 costmap. |
+| 13 | Investigate why `local_costmap` doesn't recenter on TF after a nav-mode restart following odom drift — possibly a stale-pose cache issue or TF-buffer race | New, 2026-04-28. Workaround: full `roscar-web` systemd restart. |
 
 ## Sign conventions cheat sheet
 
