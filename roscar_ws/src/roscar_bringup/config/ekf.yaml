@@ -21,8 +21,8 @@ ekf_filter_node:
     odom0: "odom_raw"
     odom0_config: [false, false, false,   # x, y, z  (don't fuse position)
                    false, false, false,   # roll, pitch, yaw
-                   true,  true,  false,   # vx, vy, vz
-                   false, false, true,    # vroll, vpitch, vyaw
+                   false, false, false,   # vx, vy, vz (chassis v2: time-triggered slam carries linear pose)
+                   false, false, false,   # vroll, vpitch, vyaw (chassis v2: stale firmware (Lx+Ly) overstates wheel-wz ~1.8x; trust IMU only)
                    false, false, false]   # ax, ay, az
     odom0_differential: false
     odom0_relative: false

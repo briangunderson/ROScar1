@@ -298,8 +298,8 @@ class RoscarDriverNode(Node):
         odom_msg.pose.covariance[21] = 1e6   # roll
         odom_msg.pose.covariance[28] = 1e6   # pitch
         odom_msg.pose.covariance[35] = 0.03  # yaw
-        odom_msg.twist.covariance[0] = 0.01  # vx
-        odom_msg.twist.covariance[7] = 0.01  # vy
+        odom_msg.twist.covariance[0] = 0.25  # vx (loose — let scan matcher dominate)
+        odom_msg.twist.covariance[7] = 0.25  # vy (loose — let scan matcher dominate)
         odom_msg.twist.covariance[14] = 1e6  # vz
         odom_msg.twist.covariance[21] = 1e6  # wx
         odom_msg.twist.covariance[28] = 1e6  # wy
