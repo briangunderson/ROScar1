@@ -24,7 +24,7 @@ from sensor_msgs.msg import Imu, MagneticField
 from std_msgs.msg import Float32
 from tf2_ros import TransformBroadcaster
 
-from roscar_driver.mecanum_kinematics import MecanumOdometry
+from roscar_driver.mecanum_kinematics import MecanumOdometry, MecanumFK
 
 
 def yaw_to_quaternion(yaw: float) -> Quaternion:
@@ -59,6 +59,12 @@ class RoscarDriverNode(Node):
         self.declare_parameter('yaw_trim', 0.0)  # rad/s per m/s forward speed
         self.declare_parameter('max_decel_linear', 1.0)   # m/s² deceleration limit
         self.declare_parameter('max_decel_angular', 3.0)   # rad/s² deceleration limit
+        # Host-side mecanum FK (chassis v2: firmware FK uses stale dims)
+        self.declare_parameter('use_host_fk', True)
+        self.declare_parameter('wheel_radius', 0.0397)
+        self.declare_parameter('half_wheelbase', 0.1065)
+        self.declare_parameter('half_track', 0.1625)
+        self.declare_parameter('encoder_cpr', 1320.0)
 
         # -- Read parameters --
         serial_port = self.get_parameter('serial_port').value
@@ -106,6 +112,20 @@ class RoscarDriverNode(Node):
 
         # -- Odometry integrator --
         self._odom = MecanumOdometry()
+
+        # -- Host-side mecanum FK (bypasses firmware's stale chassis dims) --
+        self._use_host_fk = self.get_parameter('use_host_fk').value
+        self._fk = MecanumFK(
+            wheel_radius=self.get_parameter('wheel_radius').value,
+            half_wheelbase=self.get_parameter('half_wheelbase').value,
+            half_track=self.get_parameter('half_track').value,
+            encoder_cpr=self.get_parameter('encoder_cpr').value,
+        )
+        if self._use_host_fk:
+            self.get_logger().info(
+                f'Host mecanum FK ENABLED — R={self._fk.R}m, '
+                f'Lx={self._fk.Lx}m, Ly={self._fk.Ly}m, CPR={self._fk.cpr}'
+            )
 
         # -- TF broadcaster --
         self._tf_broadcaster = TransformBroadcaster(self)
@@ -260,12 +280,22 @@ class RoscarDriverNode(Node):
         time_sec = now.nanoseconds / 1e9
 
         # --- Velocity / Odometry ---
-        # Motor wiring matches board port labels. STM32 FK produces correct
-        # velocities directly — no sign corrections needed.
-        try:
-            vx, vy, vz = self._bot.get_motion_data()
-        except Exception:
-            vx, vy, vz = 0.0, 0.0, 0.0
+        # Two FK paths:
+        #   use_host_fk=True  → read raw encoders, run mecanum FK on the Pi
+        #     with the real chassis dimensions. Required for chassis v2 since
+        #     the firmware bakes old (Lx+Ly) → wz reports are 1.78x too high.
+        #   use_host_fk=False → use firmware-computed body velocities (legacy).
+        if self._use_host_fk:
+            try:
+                m1, m2, m3, m4 = self._bot.get_motor_encoder()
+                vx, vy, vz = self._fk.update(m1, m2, m3, m4, time_sec)
+            except Exception:
+                vx, vy, vz = 0.0, 0.0, 0.0
+        else:
+            try:
+                vx, vy, vz = self._bot.get_motion_data()
+            except Exception:
+                vx, vy, vz = 0.0, 0.0, 0.0
 
         # Publish raw velocity
         vel_msg = Twist()
