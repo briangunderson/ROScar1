@@ -174,8 +174,11 @@ function subscribeLandmarks() {
 
 function setupGoalClient() {
   const ros = getRos(); if (!ros) return;
+  // Bundled roslibjs (web/js/lib/roslib.min.js) exposes ActionClient + Goal
+  // (legacy API). Use those — ROSLIB.Action / .ActionGoal don't exist here.
   goalActionClient = new ROSLIB.ActionClient({
-    ros, serverName: '/navigate_to_pose',
+    ros,
+    serverName: '/navigate_to_pose',
     actionName: 'nav2_msgs/action/NavigateToPose',
   });
 }
@@ -554,20 +557,23 @@ function setupControls() {
   const c = getCanvas();
   if (!c) return;
 
-  // Pan via drag (disabled when locked or in init-pose mode)
+  // Track press start so mouseup can decide what action to take. We deliberately
+  // do NOT rely on the synthesized `click` event — it can be flaky when the
+  // cursor moves a few pixels between press and release.
+  let navPress = null;  // { x, y } canvas coords at mousedown for nav-goal
   c.addEventListener('mousedown', (e) => {
+    const rect = c.getBoundingClientRect();
+    const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
     if (initPoseMode || e.shiftKey) {
-      // Begin init-pose drag (release will publish with drag-direction yaw)
-      const rect = c.getBoundingClientRect();
-      initPoseDrag = {
-        x0: e.clientX - rect.left, y0: e.clientY - rect.top,
-        x1: e.clientX - rect.left, y1: e.clientY - rect.top,
-        shiftStart: e.shiftKey,
-      };
+      initPoseDrag = { x0: cx, y0: cy, x1: cx, y1: cy, shiftStart: e.shiftKey };
       needsDraw = true;
       return;
     }
-    if (navGoalMode || robotLocked) return;
+    if (navGoalMode) {
+      navPress = { x: cx, y: cy };
+      return;
+    }
+    if (robotLocked) return;
     dragging = true;
     dragStart = { x: e.clientX, y: e.clientY, ox: viewOffset.x, oy: viewOffset.y };
   });
@@ -589,7 +595,6 @@ function setupControls() {
       const dx = initPoseDrag.x1 - initPoseDrag.x0;
       const dy = initPoseDrag.y1 - initPoseDrag.y0;
       const dragLen = Math.hypot(dx, dy);
-      // Below ~10 px we treat as a plain click (use current robot yaw).
       if (dragLen < 10) {
         sendInitialPose(initPoseDrag.x0, initPoseDrag.y0);
       } else {
@@ -600,10 +605,21 @@ function setupControls() {
       needsDraw = true;
       return;
     }
+    if (navPress) {
+      const rect = c.getBoundingClientRect();
+      const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
+      // Tolerate a few px of mouse jitter between mousedown and mouseup.
+      if (Math.hypot(cx - navPress.x, cy - navPress.y) < 12 && mapData) {
+        sendNavGoal(navPress.x, navPress.y);
+      }
+      navPress = null;
+      return;
+    }
     dragging = false;
   });
   c.addEventListener('mouseleave', () => {
     initPoseDrag = null;
+    navPress = null;
     dragging = false;
     needsDraw = true;
   });
@@ -634,14 +650,9 @@ function setupControls() {
     zoomAtPoint(factor, cx, cy);
   }, { passive: false });
 
-  // Nav goal on click (init-pose handled by mousedown/move/up for drag-yaw)
-  c.addEventListener('click', (e) => {
-    if (!mapData || initPoseMode || e.shiftKey) return;
-    if (navGoalMode) {
-      const rect = c.getBoundingClientRect();
-      sendNavGoal(e.clientX - rect.left, e.clientY - rect.top);
-    }
-  });
+  // (No `click` handler — nav goals fire from mouseup so they survive small
+  // mouse jitter between press and release. Init pose drag also handled in
+  // mouseup above.)
 }
 
 // ── Nav2 goal ───────────────────────────────────────────────────────────────
@@ -666,8 +677,11 @@ function sendNavGoal(canvasX, canvasY) {
   const wx  = mapData.origin.x + mpx * mapData.resolution;
   const wy  = mapData.origin.y + mpy * mapData.resolution;
 
-  const goal = new ROSLIB.ActionGoal({
-    goal: {
+  // Legacy ROSLIB.Goal API: construct Goal bound to client, attach event
+  // handlers, then send().
+  goalHandle = new ROSLIB.Goal({
+    actionClient: goalActionClient,
+    goalMessage: {
       pose: {
         header: { frame_id: 'map' },
         pose: {
@@ -677,27 +691,27 @@ function sendNavGoal(canvasX, canvasY) {
       },
     },
   });
-
-  goalHandle = goalActionClient.sendGoal(
-    goal,
-    (result) => {
-      goalHandle = null;
-      toast('Goal reached!', 'ok');
-      updateGoalUI();
-    },
-    (feedback) => { /* could show progress */ },
-  );
+  goalHandle.on('result', () => {
+    goalHandle = null;
+    toast('Goal reached!', 'ok');
+    updateGoalUI();
+  });
+  // No-op feedback handler (could surface ETA / distance remaining later).
+  goalHandle.on('feedback', () => {});
+  goalHandle.send();
 
   toast(`Nav goal: (${wx.toFixed(2)}, ${wy.toFixed(2)})`, 'ok');
-  // Exit goal-picking mode but show cancel button (goal is now active)
+  // Exit goal-picking mode but keep the cancel button visible.
   navGoalMode = false;
   updateGoalUI();
 }
 
 function cancelGoal() {
-  if (goalHandle) { try { goalHandle.cancel(); } catch (_) {} goalHandle = null; }
+  if (goalHandle) {
+    try { goalHandle.cancel(); } catch (_) {}
+    goalHandle = null;
+  }
   toast('Goal cancelled');
-  // Return to goal-picking mode if in a nav-capable mode
   navGoalMode = true;
   updateGoalUI();
 }

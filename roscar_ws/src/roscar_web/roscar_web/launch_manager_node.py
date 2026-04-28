@@ -12,9 +12,14 @@ import signal
 import subprocess
 import threading
 import time
+import math
 
 import rclpy
 from rclpy.node import Node
+from rclpy.duration import Duration
+
+from geometry_msgs.msg import PoseWithCovarianceStamped
+from tf2_ros import Buffer, TransformListener
 
 import glob as globmod
 
@@ -39,6 +44,15 @@ class LaunchManagerNode(Node):
         self._current_mode = 'idle'
         self._process = None          # subprocess.Popen of active launch
         self._process_lock = threading.Lock()
+
+        # TF + initial-pose publisher used to carry the robot's pose across a
+        # slam → navigation handoff. Without this, AMCL starts at the
+        # nav2_params default (0,0,0) and the robot ends up localized in
+        # the wrong place on the just-saved map.
+        self._tf_buffer = Buffer()
+        self._tf_listener = TransformListener(self._tf_buffer, self)
+        self._initialpose_pub = self.create_publisher(
+            PoseWithCovarianceStamped, '/initialpose', 10)
 
         self._set_mode_srv = self.create_service(
             SetMode, '/web/set_mode', self._set_mode_callback)
@@ -89,6 +103,22 @@ class LaunchManagerNode(Node):
             # (teleop=robot, slam, navigation, slam_nav) declare the arg.
             cmd.append(f'use_depth:={"true" if request.use_depth else "false"}')
 
+        # Capture current robot pose if we're transitioning slam* → navigation
+        # so AMCL can start localized where slam_toolbox left the robot,
+        # rather than at the (0,0,0) default in nav2_params.yaml.
+        carryover_pose = None
+        if mode == 'navigation' and self._current_mode in ('slam', 'slam_nav'):
+            carryover_pose = self._snapshot_map_pose()
+            if carryover_pose:
+                self.get_logger().info(
+                    f'Captured slam→nav pose carryover: '
+                    f'x={carryover_pose[0]:.2f} y={carryover_pose[1]:.2f} '
+                    f'yaw={math.degrees(carryover_pose[2]):.0f}°')
+            else:
+                self.get_logger().warn(
+                    'slam→nav transition: could not capture map→base_footprint, '
+                    'AMCL will start at nav2_params default')
+
         # Stop current launch
         self._stop_current()
 
@@ -109,9 +139,73 @@ class LaunchManagerNode(Node):
                 return response
 
         self._current_mode = mode
+
+        # Schedule delayed /initialpose publish so AMCL has time to come up
+        # via lifecycle_manager. We publish multiple times across the window
+        # in case the first one races AMCL's subscription readiness.
+        if carryover_pose:
+            threading.Thread(
+                target=self._publish_carryover_pose,
+                args=(carryover_pose,),
+                daemon=True,
+            ).start()
+
         response.success = True
         response.message = f'Switched to {mode}'
         return response
+
+    def _snapshot_map_pose(self):
+        """Look up map → base_footprint, return (x, y, yaw) or None on failure."""
+        try:
+            tf = self._tf_buffer.lookup_transform(
+                'map', 'base_footprint',
+                rclpy.time.Time(),
+                timeout=Duration(seconds=1.0),
+            )
+            x = tf.transform.translation.x
+            y = tf.transform.translation.y
+            qz = tf.transform.rotation.z
+            qw = tf.transform.rotation.w
+            yaw = 2.0 * math.atan2(qz, qw)
+            return (x, y, yaw)
+        except Exception as e:
+            self.get_logger().warn(f'TF lookup map→base_footprint failed: {e}')
+            return None
+
+    def _publish_carryover_pose(self, pose):
+        """Publish /initialpose at t+3, t+6, t+10 seconds after launch.
+
+        AMCL is brought up via lifecycle_manager (configure → activate)
+        after navigation.launch.py starts; it typically takes 5-10s before
+        the /initialpose subscription is ready. Publishing 3 times gives
+        whichever event comes first a chance to land.
+        """
+        x, y, yaw = pose
+        msg = PoseWithCovarianceStamped()
+        msg.header.frame_id = 'map'
+        msg.pose.pose.position.x = float(x)
+        msg.pose.pose.position.y = float(y)
+        msg.pose.pose.orientation.z = float(math.sin(yaw / 2.0))
+        msg.pose.pose.orientation.w = float(math.cos(yaw / 2.0))
+        cov = [0.0] * 36
+        cov[0]  = 0.05 ** 2                # 5 cm σ — we trust this pose
+        cov[7]  = 0.05 ** 2
+        cov[35] = (math.pi / 36.0) ** 2    # 5° σ
+        msg.pose.covariance = cov
+
+        last = 0.0
+        for t in (3.0, 6.0, 10.0):
+            time.sleep(t - last)
+            last = t
+            if self._current_mode != 'navigation':
+                return  # user changed mode mid-wait
+            msg.header.stamp = self.get_clock().now().to_msg()
+            try:
+                self._initialpose_pub.publish(msg)
+                self.get_logger().info(
+                    f'Published slam→nav carryover /initialpose (t+{t:.0f}s)')
+            except Exception as e:
+                self.get_logger().warn(f'/initialpose publish failed: {e}')
 
     def _save_map_callback(self, request, response):
         map_name = request.map_name.strip() or 'map'
