@@ -23,3 +23,7 @@ landmark_localizer:
     learned_markers_file: "/home/brian/roscar_ws/learned_markers.yaml"
     tf_prefix: "aruco_"
     marker_ids: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+    # TF frame names (override here without code edits)
+    map_frame: "map"
+    base_frame: "base_footprint"
+    camera_optical_frame: "camera_color_optical_frame"

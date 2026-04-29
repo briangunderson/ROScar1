@@ -122,6 +122,7 @@ function connect() {
     connected = false;
     cmdVelPub = null;
     setConnUI(false);
+    notifyModules('disconnected');
     setTimeout(connect, 3000);
   });
 }

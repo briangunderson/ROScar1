@@ -75,10 +75,13 @@ class ArucoDetectorNode(Node):
         self.bridge = CvBridge()
         self.camera_matrix = None
         self.dist_coeffs = None
+        self._intrinsics_dims = None  # (width, height) of cached intrinsics
 
-        # Rate limiting
-        self.min_period = 1.0 / self.detection_rate if self.detection_rate > 0 else 0.0
-        self.last_detect_time = 0.0
+        # Latest-frame slot (single-slot pattern to prevent backlog under load).
+        # image_cb stores the most recent frame; the detection timer pulls and
+        # processes it, silently overwriting older frames if inference is slow.
+        self._latest_frame = None       # the sensor_msgs/Image message itself
+        self._last_processed_frame = None  # identity check to skip duplicates
 
         # Publishers
         self.image_pub = self.create_publisher(Image, '/aruco/image', 1)
@@ -89,26 +92,51 @@ class ArucoDetectorNode(Node):
         self.create_subscription(Image, '/image_raw', self.image_cb, 1)
         self.create_subscription(CameraInfo, '/camera_info', self.camera_info_cb, 1)
 
+        # Detection timer — pulls latest frame at the configured rate.
+        # This decouples inference from the subscriber callback so the executor
+        # never blocks on slow detection work.
+        if self.detection_rate > 0:
+            period = 1.0 / self.detection_rate
+            self.create_timer(period, self._detect_timer_cb)
+
         self.get_logger().info(
             f'ArUco detector started: dict={dict_name}, '
             f'marker_size={self.marker_size}m, rate={self.detection_rate}Hz'
         )
 
     def camera_info_cb(self, msg):
-        """Cache camera intrinsics from /camera_info."""
-        if self.camera_matrix is not None:
-            return  # Already have intrinsics
+        """Cache camera intrinsics from /camera_info; refresh on resolution change."""
+        dims = (msg.width, msg.height)
+        if self._intrinsics_dims == dims:
+            return  # Same resolution as cached — no-op
         self.camera_matrix = np.array(msg.k).reshape(3, 3)
         self.dist_coeffs = np.array(msg.d)
-        self.get_logger().info('Camera intrinsics received')
+        if self._intrinsics_dims is None:
+            self.get_logger().info(
+                f'Camera intrinsics received ({dims[0]}x{dims[1]})'
+            )
+        else:
+            self.get_logger().info(
+                f'Camera intrinsics refreshed: '
+                f'{self._intrinsics_dims[0]}x{self._intrinsics_dims[1]} '
+                f'-> {dims[0]}x{dims[1]}'
+            )
+        self._intrinsics_dims = dims
 
     def image_cb(self, msg):
-        """Process incoming camera frame for ArUco markers."""
-        now = self.get_clock().now().nanoseconds / 1e9
-        if (now - self.last_detect_time) < self.min_period:
-            return
-        self.last_detect_time = now
+        """Store latest frame; detection runs on a separate timer."""
+        self._latest_frame = msg
 
+    def _detect_timer_cb(self):
+        """Pull latest frame and run detection. Skip if no new frame available."""
+        msg = self._latest_frame
+        if msg is None or msg is self._last_processed_frame:
+            return
+        self._last_processed_frame = msg
+        self._process_frame(msg)
+
+    def _process_frame(self, msg):
+        """Process a single camera frame for ArUco markers."""
         try:
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
         except Exception as e:
@@ -138,9 +166,13 @@ class ArucoDetectorNode(Node):
                 ], dtype=np.float32)
 
                 for i, marker_id in enumerate(ids.flatten()):
+                    # IPPE_SQUARE: deterministic, designed for square coplanar
+                    # markers. Avoids the orientation-flip ambiguity that plain
+                    # SOLVEPNP_ITERATIVE has on coplanar 4-point inputs.
                     ok, rvec, tvec = cv2.solvePnP(
                         obj_points, corners[i][0],
                         self.camera_matrix, self.dist_coeffs,
+                        flags=cv2.SOLVEPNP_IPPE_SQUARE,
                     )
                     if not ok:
                         continue

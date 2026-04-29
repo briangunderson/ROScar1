@@ -19,7 +19,14 @@ let mapToOdom = null;   // {tx, ty, yaw} — latest map→odom transform from sl
 let lastTFTime = 0;     // timestamp of last map→odom TF update
 const TF_STALE_MS = 5000; // ignore map→odom if stale
 let mapData  = null;    // {width, height, resolution, origin, data[]}
+let mapDataVersion = 0; // bumped each time /map publishes new data
 let robotPos = null;    // {x, y, yaw}
+
+// Offscreen canvas cache — rebuilt only when grid data changes, NOT every
+// RAF tick. In locked-to-robot mode needsDraw fires at ~20Hz (10Hz odom +
+// 10Hz TF), but the OccupancyGrid itself only updates on /map publish.
+let offscreenCache = null;       // HTMLCanvasElement or null
+let offscreenCacheVersion = -1;  // mapDataVersion the cache was built from
 
 // View transform (canvas pixels per map pixel)
 let viewScale  = 1.0;
@@ -68,6 +75,9 @@ export function clearMap() {
   robotPos = null;
   mapToOdom = null;
   lastTFTime = 0;
+  // Invalidate the offscreen cache so a future /map publish rebuilds it.
+  offscreenCache = null;
+  offscreenCacheVersion = -1;
   needsDraw = true;
 }
 
@@ -75,9 +85,19 @@ export function clearMap() {
 function subscribeMap() {
   const ros = getRos(); if (!ros) return;
   if (mapSub) { try { mapSub.unsubscribe(); } catch (_) {} }
+  // QoS note: slam_toolbox publishes /map with TRANSIENT_LOCAL durability so
+  // late-joining subscribers immediately receive the latest map. The bundled
+  // roslibjs (web/js/lib/roslib.min.js) does NOT accept a `qos` or
+  // `durability` field on ROSLIB.Topic — its only ctor knobs are
+  // {name, messageType, compression, throttle_rate, latch, queue_size,
+  // queue_length, reconnect_on_close}. Setting `latch: true` causes
+  // rosbridge_server to negotiate a TRANSIENT_LOCAL+RELIABLE subscription on
+  // the ROS side, so we do receive the latched map immediately on connect
+  // (rather than waiting up to 5s for slam_toolbox's periodic republish).
   mapSub = new ROSLIB.Topic({
     ros, name: '/map', messageType: 'nav_msgs/OccupancyGrid',
     throttle_rate: 1000,
+    latch: true,
   });
   let prevW = 0, prevH = 0;
   let prevOriginX = null, prevOriginY = null;
@@ -91,6 +111,9 @@ function subscribeMap() {
       origin: msg.info.origin.position,
       data: Array.from(msg.data),
     };
+    // Bump version so drawMap rebuilds its offscreen canvas exactly once
+    // per /map publish, not every RAF tick.
+    mapDataVersion++;
     setEl('map-size-disp', `${w}\u00d7${h}`);
     setEl('map-res-disp',  `${(msg.info.resolution * 100).toFixed(0)}cm`);
     // Re-fit view when map dimensions or origin change (grid expanded by SLAM)
@@ -276,27 +299,35 @@ function drawMap() {
   // In locked mode, recompute viewOffset each frame to track the robot
   if (robotLocked) computeLockedOffset(c);
 
-  // Render OccupancyGrid as ImageData
-  const imgData = ctx.createImageData(mapData.width, mapData.height);
-  const d = imgData.data;
-  for (let i = 0; i < mapData.data.length; i++) {
-    const v = mapData.data[i];
-    const base = i * 4;
-    if (v === -1) {       // unknown
-      d[base] = 13; d[base + 1] = 34; d[base + 2] = 51; d[base + 3] = 255;
-    } else if (v === 0) { // free
-      d[base] = 8;  d[base + 1] = 17; d[base + 2] = 26; d[base + 3] = 255;
-    } else {              // occupied (1-100)
-      const bright = Math.floor(180 * v / 100);
-      d[base] = bright; d[base + 1] = bright; d[base + 2] = bright; d[base + 3] = 255;
+  // Build offscreen canvas only when the underlying grid data changes.
+  // The transform/draw onto the visible canvas still runs every RAF tick,
+  // but we no longer allocate ImageData + a canvas per frame in locked mode.
+  if (!offscreenCache
+      || offscreenCacheVersion !== mapDataVersion
+      || offscreenCache.width  !== mapData.width
+      || offscreenCache.height !== mapData.height) {
+    const imgData = ctx.createImageData(mapData.width, mapData.height);
+    const d = imgData.data;
+    for (let i = 0; i < mapData.data.length; i++) {
+      const v = mapData.data[i];
+      const base = i * 4;
+      if (v === -1) {       // unknown
+        d[base] = 13; d[base + 1] = 34; d[base + 2] = 51; d[base + 3] = 255;
+      } else if (v === 0) { // free
+        d[base] = 8;  d[base + 1] = 17; d[base + 2] = 26; d[base + 3] = 255;
+      } else {              // occupied (1-100)
+        const bright = Math.floor(180 * v / 100);
+        d[base] = bright; d[base + 1] = bright; d[base + 2] = bright; d[base + 3] = 255;
+      }
     }
+    const cv = document.createElement('canvas');
+    cv.width  = mapData.width;
+    cv.height = mapData.height;
+    cv.getContext('2d').putImageData(imgData, 0, 0);
+    offscreenCache = cv;
+    offscreenCacheVersion = mapDataVersion;
   }
-
-  // Draw via offscreen canvas for scaling
-  const offscreen = document.createElement('canvas');
-  offscreen.width  = mapData.width;
-  offscreen.height = mapData.height;
-  offscreen.getContext('2d').putImageData(imgData, 0, 0);
+  const offscreen = offscreenCache;
 
   ctx.save();
 
@@ -624,21 +655,87 @@ function setupControls() {
     needsDraw = true;
   });
 
-  // Touch pan (disabled when locked)
+  // Touch handlers — mirror the mouse press-tracking so tablet users can also
+  // drop nav goals and seed the initial pose. touchstart/touchmove/touchend
+  // are NOT passive here because we may need preventDefault() to suppress the
+  // synthesized `click` (and stop the page from scrolling/pinch-zooming
+  // during a goal tap).
   let touchStart = null;
   c.addEventListener('touchstart', (e) => {
-    if (navGoalMode || robotLocked || e.touches.length !== 1) return;
+    if (e.touches.length !== 1) return;
     const t = e.touches[0];
+    const rect = c.getBoundingClientRect();
+    const cx = t.clientX - rect.left, cy = t.clientY - rect.top;
+
+    if (initPoseMode) {
+      initPoseDrag = { x0: cx, y0: cy, x1: cx, y1: cy, shiftStart: false };
+      needsDraw = true;
+      e.preventDefault();
+      return;
+    }
+    if (navGoalMode) {
+      // Reuse the same press state that mouse handlers use, so tap-to-go
+      // behaves identically across input modalities.
+      navPress = { x: cx, y: cy };
+      e.preventDefault();
+      return;
+    }
+    if (robotLocked) return;
     touchStart = { x: t.clientX, y: t.clientY, ox: viewOffset.x, oy: viewOffset.y };
-  }, { passive: true });
+  }, { passive: false });
   c.addEventListener('touchmove', (e) => {
-    if (!touchStart || e.touches.length !== 1) return;
+    if (e.touches.length !== 1) return;
     const t = e.touches[0];
+    if (initPoseDrag) {
+      const rect = c.getBoundingClientRect();
+      initPoseDrag.x1 = t.clientX - rect.left;
+      initPoseDrag.y1 = t.clientY - rect.top;
+      needsDraw = true;
+      e.preventDefault();
+      return;
+    }
+    if (!touchStart) return;
     viewOffset.x = touchStart.ox + (t.clientX - touchStart.x);
     viewOffset.y = touchStart.oy + (t.clientY - touchStart.y);
     needsDraw = true;
-  }, { passive: true });
-  c.addEventListener('touchend', () => { touchStart = null; });
+  }, { passive: false });
+  c.addEventListener('touchend', (e) => {
+    // Use changedTouches because touches[] is empty after the last finger lifts
+    const t = e.changedTouches && e.changedTouches[0];
+    if (initPoseDrag) {
+      const dx = initPoseDrag.x1 - initPoseDrag.x0;
+      const dy = initPoseDrag.y1 - initPoseDrag.y0;
+      const dragLen = Math.hypot(dx, dy);
+      if (dragLen < 10) {
+        sendInitialPose(initPoseDrag.x0, initPoseDrag.y0);
+      } else {
+        sendInitialPoseDrag(initPoseDrag.x0, initPoseDrag.y0,
+                             initPoseDrag.x1, initPoseDrag.y1);
+      }
+      initPoseDrag = null;
+      needsDraw = true;
+      e.preventDefault();
+      return;
+    }
+    if (navPress && t) {
+      const rect = c.getBoundingClientRect();
+      const cx = t.clientX - rect.left, cy = t.clientY - rect.top;
+      // Same 12-px slop as mouseup so tap jitter doesn't kill the goal.
+      if (Math.hypot(cx - navPress.x, cy - navPress.y) < 12 && mapData) {
+        sendNavGoal(navPress.x, navPress.y);
+      }
+      navPress = null;
+      e.preventDefault();
+      return;
+    }
+    touchStart = null;
+  }, { passive: false });
+  c.addEventListener('touchcancel', () => {
+    touchStart = null;
+    navPress = null;
+    initPoseDrag = null;
+    needsDraw = true;
+  });
 
   // Scroll zoom (toward cursor in free mode, centered in locked mode)
   c.addEventListener('wheel', (e) => {

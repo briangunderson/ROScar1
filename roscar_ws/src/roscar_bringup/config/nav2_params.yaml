@@ -47,7 +47,19 @@ amcl:
     z_rand: 0.5
     z_short: 0.05
     scan_topic: scan
-    set_initial_pose: true
+    # set_initial_pose: false — AMCL waits for an explicit /initialpose rather
+    # than latching the YAML default at activation. This avoids a race with
+    # launch_manager's slam→nav carryover publishes (t+3/6/10s) and the
+    # dashboard's INIT button: with `true`, AMCL would briefly latch (0,0,0)
+    # before the carryover or user click lands, causing localization jumps.
+    #
+    # Operator note: when starting navigation.launch.py manually (no
+    # carryover, no dashboard INIT), you MUST set the initial pose yourself
+    # via one of:
+    #   - rviz2 "2D Pose Estimate" tool
+    #   - the dashboard's INIT button on the map tile
+    #   - CLI:  ros2 topic pub --once /initialpose geometry_msgs/PoseWithCovarianceStamped ...
+    set_initial_pose: false
     initial_pose:
       x: 0.0
       y: 0.0

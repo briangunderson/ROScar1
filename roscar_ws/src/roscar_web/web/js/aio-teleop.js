@@ -196,8 +196,10 @@ function publishVelocity() {
     setSource('--');
   }
 
-  // Dim speed sliders when SpaceMouse is active source
-  document.querySelectorAll('.drive .slider-row').forEach(
+  // Dim speed sliders when SpaceMouse is active source. The AIO DOM puts the
+  // teleop panel under #panel-drive (not the legacy `.drive` class), so the
+  // old selector matched nothing and the dim-state never applied.
+  document.querySelectorAll('#panel-drive .slider-row').forEach(
     row => row.classList.toggle('sm-dimmed', smVel !== null)
   );
 

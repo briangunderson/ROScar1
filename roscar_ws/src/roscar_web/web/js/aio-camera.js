@@ -15,8 +15,15 @@ const PANEL = '#panel-camera';
 const RETRY_INTERVAL = 3000; // ms — retry stream when offline
 
 let retryTimer = null;
+let initialized = false;
 
 export function initCamera() {
+  // Guard against double-init (e.g. accidental re-import or HMR) — without
+  // this, every call would stack another setInterval and we'd thrash the
+  // <img> element with overlapping startStream() retries.
+  if (initialized) return;
+  initialized = true;
+
   setupControls();
   onAppEvent((ev) => {
     if (ev === 'connected') startStream();
@@ -28,9 +35,22 @@ export function initCamera() {
     startStream();
   });
   // Periodic retry: when the stream is down (e.g. camera node not yet
-  // running after a mode switch), re-attempt every few seconds.
+  // running after a mode switch), re-attempt every few seconds. Once the
+  // stream is healthy we stop polling — the <img> onerror handler will
+  // re-arm the timer if the stream drops again.
+  startRetryTimer();
+}
+
+function startRetryTimer() {
+  if (retryTimer) return;
   retryTimer = setInterval(() => {
-    if (!streaming) startStream();
+    if (streaming) {
+      // Stream is up — stop burning a timer tick every few seconds.
+      clearInterval(retryTimer);
+      retryTimer = null;
+    } else {
+      startStream();
+    }
   }, RETRY_INTERVAL);
 }
 
@@ -63,6 +83,7 @@ function startStream() {
     clearTimeout(streamTimeout);
     overlay.style.display = '';
     streaming = false;
+    startRetryTimer();  // resume polling until the stream comes back
   };
 
   // Force the browser to re-request by busting any cached failed response

@@ -45,6 +45,12 @@ class LaunchManagerNode(Node):
         self._process = None          # subprocess.Popen of active launch
         self._process_lock = threading.Lock()
 
+        # Cancellation flag for the slam→nav carryover background thread.
+        # set() any time the user changes mode so an in-flight carryover
+        # publisher stops before publishing /initialpose into the wrong mode.
+        self._carryover_cancel = threading.Event()
+        self._carryover_cancel.set()  # idle: no carryover in flight
+
         # TF + initial-pose publisher used to carry the robot's pose across a
         # slam → navigation handoff. Without this, AMCL starts at the
         # nav2_params default (0,0,0) and the robot ends up localized in
@@ -75,6 +81,12 @@ class LaunchManagerNode(Node):
             f'set_mode request received: mode={mode!r} '
             f'map_path={request.map_path!r} use_depth={request.use_depth}'
         )
+
+        # Any mode change cancels an in-flight carryover publisher. The bg
+        # thread checks this between sleeps and before each publish, so we
+        # set it here unconditionally (before validation) to make sure even
+        # rapid bounces (slam_nav→navigation→teleop) interrupt cleanly.
+        self._carryover_cancel.set()
 
         if mode not in AVAILABLE_MODES:
             response.success = False
@@ -143,7 +155,11 @@ class LaunchManagerNode(Node):
         # Schedule delayed /initialpose publish so AMCL has time to come up
         # via lifecycle_manager. We publish multiple times across the window
         # in case the first one races AMCL's subscription readiness.
+        # Clear the cancel flag right before launching so the new thread is
+        # allowed to run; any subsequent _set_mode_callback will set() it
+        # again and interrupt this thread.
         if carryover_pose:
+            self._carryover_cancel.clear()
             threading.Thread(
                 target=self._publish_carryover_pose,
                 args=(carryover_pose,),
@@ -155,22 +171,44 @@ class LaunchManagerNode(Node):
         return response
 
     def _snapshot_map_pose(self):
-        """Look up map → base_footprint, return (x, y, yaw) or None on failure."""
-        try:
-            tf = self._tf_buffer.lookup_transform(
-                'map', 'base_footprint',
-                rclpy.time.Time(),
-                timeout=Duration(seconds=1.0),
-            )
-            x = tf.transform.translation.x
-            y = tf.transform.translation.y
-            qz = tf.transform.rotation.z
-            qw = tf.transform.rotation.w
-            yaw = 2.0 * math.atan2(qz, qw)
-            return (x, y, yaw)
-        except Exception as e:
-            self.get_logger().warn(f'TF lookup map→base_footprint failed: {e}')
-            return None
+        """Look up map → base_footprint, return (x, y, yaw) or None on failure.
+
+        slam_toolbox's map→odom publish is bursty — it pauses between scan
+        matches and may briefly be >1s stale. A single 1s-timeout lookup can
+        extrapolate-fail in that gap, so we retry within a ~1s budget and
+        only log+return None if every attempt fails. We never raise out of
+        here: callers fall back to "no carryover" rather than failing the
+        service call.
+        """
+        deadline = time.monotonic() + 1.0
+        attempt = 0
+        last_err = None
+        while time.monotonic() < deadline:
+            attempt += 1
+            try:
+                tf = self._tf_buffer.lookup_transform(
+                    'map', 'base_footprint',
+                    rclpy.time.Time(),                # latest available
+                    timeout=Duration(seconds=0.3),
+                )
+                x = tf.transform.translation.x
+                y = tf.transform.translation.y
+                qz = tf.transform.rotation.z
+                qw = tf.transform.rotation.w
+                yaw = 2.0 * math.atan2(qz, qw)
+                if attempt > 1:
+                    self.get_logger().info(
+                        f'map→base_footprint TF acquired on attempt {attempt}')
+                return (x, y, yaw)
+            except Exception as e:
+                last_err = e
+                # Brief pause before retry — gives slam_toolbox time to
+                # publish the next map→odom update.
+                time.sleep(0.15)
+        self.get_logger().warn(
+            f'TF lookup map→base_footprint failed after {attempt} attempts: '
+            f'{last_err}')
+        return None
 
     def _publish_carryover_pose(self, pose):
         """Publish /initialpose at t+3, t+6, t+10 seconds after launch.
@@ -179,6 +217,13 @@ class LaunchManagerNode(Node):
         after navigation.launch.py starts; it typically takes 5-10s before
         the /initialpose subscription is ready. Publishing 3 times gives
         whichever event comes first a chance to land.
+
+        Cancellation: we check self._carryover_cancel between sleeps and
+        before each publish. _set_mode_callback set()s this on every mode
+        change, so a user switching away from navigation mid-wait stops
+        further /initialpose publishes immediately. This avoids the prior
+        race where reading self._current_mode without a lock could let a
+        publish slip out after a mode change.
         """
         x, y, yaw = pose
         msg = PoseWithCovarianceStamped()
@@ -195,10 +240,16 @@ class LaunchManagerNode(Node):
 
         last = 0.0
         for t in (3.0, 6.0, 10.0):
-            time.sleep(t - last)
+            # Sleep in small slices so cancellation kicks in promptly even
+            # during the long t+10 leg.
+            target = time.monotonic() + (t - last)
             last = t
-            if self._current_mode != 'navigation':
-                return  # user changed mode mid-wait
+            while time.monotonic() < target:
+                if self._carryover_cancel.is_set():
+                    return
+                time.sleep(min(0.1, target - time.monotonic()))
+            if self._carryover_cancel.is_set():
+                return
             msg.header.stamp = self.get_clock().now().to_msg()
             try:
                 self._initialpose_pub.publish(msg)

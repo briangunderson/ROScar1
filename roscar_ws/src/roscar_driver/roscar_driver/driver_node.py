@@ -257,14 +257,13 @@ class RoscarDriverNode(Node):
             self._send_motor_cmd()
 
     def _send_motor_cmd(self):
-        """Send current velocity to motor board.
+        """Send current velocity to the motor board.
 
-        Board is mounted 180° rotated AND motor L/R ports are swapped.
-        For linear axes (vx, vy): the 180° rotation reverses them, but the
-        L/R port swap (with H-bridge polarity difference) also reverses them.
-        Two reversals cancel → send vx, vy unchanged.
-        For angular axis (wz): 180° rotation does NOT affect Z-rotation, but
-        the L/R port swap reverses rotation direction → negate wz only.
+        Motor wiring was physically corrected on chassis v2 so that the four
+        ports match their board labels (M1=FL, M2=RL, M3=FR, M4=RR) with
+        +PWM = forward. cmd_vel therefore needs no sign corrections — vx, vy,
+        wz are passed straight through to set_car_motion. See CLAUDE.md
+        "Hardware Orientation" for the full sensor sign table.
         """
         if self._bot is not None:
             vx, vy, wz = self._current_vel

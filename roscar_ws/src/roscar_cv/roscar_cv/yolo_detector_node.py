@@ -32,9 +32,11 @@ class YoloDetectorNode(Node):
             self.filter_classes = []
         self.annotate = self.get_parameter('annotate_image').value
 
-        # Rate limiting
-        self.min_period = 1.0 / self.detection_rate if self.detection_rate > 0 else 0.0
-        self.last_detect_time = 0.0
+        # Latest-frame slot (single-slot pattern to prevent backlog under load).
+        # image_cb stores the most recent frame; the detection timer pulls and
+        # processes it, silently overwriting older frames if inference is slow.
+        self._latest_frame = None         # the sensor_msgs/Image message itself
+        self._last_processed_frame = None # identity check to skip duplicates
 
         self.bridge = CvBridge()
 
@@ -77,21 +79,36 @@ class YoloDetectorNode(Node):
         self.create_subscription(Image, '/image_raw', self.image_cb, img_qos)
         self._frame_count = 0
 
+        # Detection timer — pulls latest frame at the configured rate.
+        # This decouples GPU inference from the subscriber callback so the
+        # executor never blocks on slow inference work.
+        if self.detection_rate > 0:
+            period = 1.0 / self.detection_rate
+            self.create_timer(period, self._detect_timer_cb)
+
         self.get_logger().info('Subscribed to /image_raw (BEST_EFFORT, depth=5)')
 
     def image_cb(self, msg):
-        """Run YOLO inference on incoming frame."""
+        """Store latest frame; inference runs on a separate timer."""
         if self.model is None:
             return
         self._frame_count += 1
         if self._frame_count <= 3 or self._frame_count % 100 == 0:
             self.get_logger().info(f'image_cb frame #{self._frame_count}')
+        self._latest_frame = msg
 
-        now = self.get_clock().now().nanoseconds / 1e9
-        if (now - self.last_detect_time) < self.min_period:
+    def _detect_timer_cb(self):
+        """Pull latest frame and run inference. Skip if no new frame available."""
+        if self.model is None:
             return
-        self.last_detect_time = now
+        msg = self._latest_frame
+        if msg is None or msg is self._last_processed_frame:
+            return
+        self._last_processed_frame = msg
+        self._process_frame(msg)
 
+    def _process_frame(self, msg):
+        """Run YOLO inference on a single frame."""
         try:
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
         except Exception as e:
