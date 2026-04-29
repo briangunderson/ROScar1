@@ -28,14 +28,14 @@ slam_toolbox:
     # -- Map resolution --
     resolution: 0.05              # 5cm grid — good indoor balance
     max_laser_range: 8.0          # Trim noisy long-range returns that confuse matching
-    minimum_time_interval: 0.3    # Process scans at ~3Hz (balanced: faster than 2Hz but won't flood queue)
+    minimum_time_interval: 0.2    # Process scans at ~5Hz (chassis v2: tighter scan cadence to fight mast wobble drift)
     transform_timeout: 0.5        # Tolerant for RPi5 timing jitter
     tf_buffer_duration: 30.0
 
     # -- Scan matching thresholds --
     # Moderately tighter thresholds to reduce drift without flooding the async queue
-    minimum_travel_distance: 0.2  # meters (was 0.3 — 33% tighter, won't overwhelm solver)
-    minimum_travel_heading: 0.2   # radians (~11.5 deg, was 0.3)
+    minimum_travel_distance: 0.0  # meters (chassis v2: pure time-triggered scan match — wheel odom too slip-prone on carpet)
+    minimum_travel_heading: 0.0   # radians (chassis v2: pure time-triggered)
 
     # -- Loop closure --
     loop_search_maximum_distance: 4.0   # meters — wider search for recovery

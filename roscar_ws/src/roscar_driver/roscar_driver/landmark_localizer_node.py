@@ -13,8 +13,8 @@ Supports two modes:
 
 Architecture: Subscribes directly to /aruco/markers (visualization_msgs) from
 the ArUco detector on WSL2. Uses the raw marker pose (in optical frame convention
-from OpenCV's solvePnP) plus local TF chain (map->camera_optical_frame) to compute
-marker position in map frame. The URDF's camera_optical_frame joint handles the
+from OpenCV's solvePnP) plus local TF chain (map->camera_color_optical_frame) to compute
+marker position in map frame. The URDF's camera_color_optical_frame joint handles the
 optical-to-ROS coordinate conversion via its rpy=(-π/2, 0, -π/2) rotation.
 This avoids relying on cross-machine /tf for ArUco frames, which has DDS
 discovery issues with CycloneDDS unicast when many participants are active.
@@ -133,6 +133,10 @@ class LandmarkLocalizerNode(Node):
         self.declare_parameter('load_learned', False)        # load markers from file on startup
             # False for SLAM (new map frame each session)
             # True for navigation (fixed map, markers persist)
+        # TF frame names — parameterized so they can be retargeted without code edits
+        self.declare_parameter('map_frame', 'map')
+        self.declare_parameter('base_frame', 'base_footprint')
+        self.declare_parameter('camera_optical_frame', 'camera_color_optical_frame')
 
         self.correction_threshold = self.get_parameter('correction_threshold').value
         self.correction_interval = self.get_parameter('correction_interval').value
@@ -142,8 +146,11 @@ class LandmarkLocalizerNode(Node):
         self.tf_prefix = self.get_parameter('tf_prefix').value
         self.marker_ids = self.get_parameter('marker_ids').value
         self.velocity_threshold = self.get_parameter('velocity_threshold').value
+        self.map_frame = self.get_parameter('map_frame').value
+        self.base_frame = self.get_parameter('base_frame').value
+        self.camera_optical_frame = self.get_parameter('camera_optical_frame').value
 
-        # TF — only used for LOCAL transforms (map->camera_optical_frame)
+        # TF — only used for LOCAL transforms (map->camera_color_optical_frame)
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
@@ -154,8 +161,29 @@ class LandmarkLocalizerNode(Node):
         if self.load_learned:
             self._load_learned_markers()
         else:
-            self.get_logger().info(
-                'load_learned=False: starting with empty marker set (SLAM mode)')
+            # SLAM-style session: any prior content of `learned_file` came from
+            # a previous (now-discarded) map frame and would be wrong here.
+            # Truncate so the file reflects ONLY this session's sightings —
+            # important because save_map snapshots this file into a per-map
+            # sidecar, and we don't want to ship stale entries with the
+            # newly-saved map.
+            try:
+                if os.path.exists(self.learned_file):
+                    # Atomic truncate: write '{}\n' to tmp, fsync, then replace.
+                    tmp_path = self.learned_file + '.tmp'
+                    with open(tmp_path, 'w') as f:
+                        f.write('{}\n')
+                        f.flush()
+                        os.fsync(f.fileno())
+                    os.replace(tmp_path, self.learned_file)
+                    self.get_logger().info(
+                        f'load_learned=False: truncated stale marker file {self.learned_file}')
+                else:
+                    self.get_logger().info(
+                        'load_learned=False: starting with empty marker set (SLAM mode)')
+            except Exception as e:
+                self.get_logger().warn(
+                    f'load_learned=False: could not truncate {self.learned_file}: {e}')
 
         # State
         self.last_correction_time = 0.0
@@ -266,15 +294,24 @@ class LandmarkLocalizerNode(Node):
         self.markers_pub.publish(msg)
 
     def _save_learned_markers(self):
-        """Save auto-learned marker positions to disk."""
+        """Save auto-learned marker positions to disk atomically.
+
+        Writes to a tmp file + fsyncs + os.replace so a crash mid-write
+        cannot leave the on-disk file truncated/garbled. os.replace is
+        atomic on POSIX and on Windows for same-filesystem replacements.
+        """
         try:
             data = {}
             for mid, (x, y, z, yaw) in self.known_markers.items():
                 data[str(mid)] = {'x': float(x), 'y': float(y),
                                   'z': float(z), 'yaw': float(yaw)}
             os.makedirs(os.path.dirname(self.learned_file), exist_ok=True)
-            with open(self.learned_file, 'w') as f:
+            tmp_path = self.learned_file + '.tmp'
+            with open(tmp_path, 'w') as f:
                 yaml.dump(data, f, default_flow_style=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, self.learned_file)
         except Exception as e:
             self.get_logger().warn(f'Failed to save learned markers: {e}')
 
@@ -282,14 +319,14 @@ class LandmarkLocalizerNode(Node):
         """Process ArUco marker detections directly from /aruco/markers topic.
 
         Each marker in the array has:
-        - header.frame_id = 'camera_link'
+        - header.frame_id = 'camera_color_optical_frame'
         - id = ArUco marker ID
         - pose = marker pose in OPTICAL frame convention (z=forward, x=right, y=down)
                  (OpenCV's solvePnP always returns in camera/optical convention)
 
         Instead of manually converting optical→camera_link, we use the URDF's
-        camera_optical_frame (which already has the correct rpy=-π/2,0,-π/2
-        rotation relative to camera_link). We look up map→camera_optical_frame
+        camera_color_optical_frame (which already has the correct rpy=-π/2,0,-π/2
+        rotation relative to camera_link). We look up map→camera_color_optical_frame
         and use the raw tvec directly — the TF tree handles the frame rotation.
         """
         if not msg.markers:
@@ -317,7 +354,12 @@ class LandmarkLocalizerNode(Node):
                     f'Marker {marker_id}: too far ({marker_dist:.2f}m)')
                 continue
 
-            # Build pose in optical frame (use raw tvec, identity orientation)
+            # Build pose in optical frame (use raw tvec, identity orientation).
+            # NOTE: orientation is intentionally overwritten to identity. The
+            # chained map→marker matrix below therefore carries NO real marker
+            # yaw — only the camera's frame yaw at observation time. The yaw
+            # correction path further down accounts for this by NOT trusting
+            # the extracted obs_yaw (see comment near drift_yaw).
             optical_pose = marker.pose
             optical_pose.position.x = raw_x
             optical_pose.position.y = raw_y
@@ -327,18 +369,21 @@ class LandmarkLocalizerNode(Node):
             optical_pose.orientation.z = 0.0
             optical_pose.orientation.w = 1.0
 
-            # Look up LOCAL TF: map -> camera_optical_frame
-            # The URDF defines camera_optical_frame with rpy=(-π/2, 0, -π/2)
+            # Look up LOCAL TF: map -> <camera optical frame>
+            # The URDF defines the camera optical frame with rpy=(-π/2, 0, -π/2)
             # relative to camera_link, so the TF tree handles the optical→ROS
-            # coordinate conversion automatically.
+            # coordinate conversion automatically. Prefer the frame_id the
+            # ArUco detector actually published with the marker; fall back to
+            # the configured parameter if the header has no frame_id.
+            optical_frame = marker.header.frame_id or self.camera_optical_frame
             try:
                 map_to_optical = self.tf_buffer.lookup_transform(
-                    'map', 'camera_optical_frame', Time(),
+                    self.map_frame, optical_frame, Time(),
                     timeout=rclpy.duration.Duration(seconds=0.1))
             except (tf2_ros.LookupException, tf2_ros.ConnectivityException,
                     tf2_ros.ExtrapolationException) as e:
                 self.get_logger().debug(
-                    f'Marker {marker_id}: map->camera_optical_frame TF failed: {e}')
+                    f'Marker {marker_id}: {self.map_frame}->{optical_frame} TF failed: {e}')
                 continue
 
             # Compute map -> marker by chaining: map->optical * optical->marker
@@ -349,7 +394,12 @@ class LandmarkLocalizerNode(Node):
             obs_x = map_marker_mat[0, 3]
             obs_y = map_marker_mat[1, 3]
             obs_z = map_marker_mat[2, 3]
-            obs_yaw = _yaw_from_matrix(map_marker_mat)
+            # obs_yaw would be meaningless: optical_pose orientation was zeroed
+            # above, so map_marker_mat's rotation is just map→optical (the
+            # camera's frame yaw, NOT the marker's yaw in the map). We keep
+            # obs_yaw at 0.0 and skip yaw correction entirely below — only
+            # translation drift correction is reliable with this pipeline.
+            obs_yaw = 0.0
 
             # Track visibility for dashboard
             self._visible_markers[marker_id] = now_sec
@@ -393,7 +443,7 @@ class LandmarkLocalizerNode(Node):
             # Compute corrected robot pose
             try:
                 map_to_base = self.tf_buffer.lookup_transform(
-                    'map', 'base_footprint', Time(),
+                    self.map_frame, self.base_frame, Time(),
                     timeout=rclpy.duration.Duration(seconds=0.05))
             except (tf2_ros.LookupException, tf2_ros.ConnectivityException,
                     tf2_ros.ExtrapolationException):
@@ -402,18 +452,19 @@ class LandmarkLocalizerNode(Node):
             corrected_x = map_to_base.transform.translation.x + drift_x
             corrected_y = map_to_base.transform.translation.y + drift_y
 
-            # For yaw correction, compute the angular drift
-            drift_yaw = known_yaw - obs_yaw
-            drift_yaw = math.atan2(math.sin(drift_yaw), math.cos(drift_yaw))
-
+            # Yaw correction is intentionally a no-op: optical_pose orientation
+            # is overwritten to identity above, so we cannot recover a real
+            # marker yaw from map_marker_mat. Keep the robot's current yaw
+            # untouched and only correct (x, y) drift.
             base_q = map_to_base.transform.rotation
             base_yaw = _yaw_from_quaternion(base_q.x, base_q.y, base_q.z, base_q.w)
-            corrected_yaw = base_yaw + drift_yaw
+            drift_yaw = 0.0
+            corrected_yaw = base_yaw
 
             # Publish corrected pose to /initialpose
             pose_msg = PoseWithCovarianceStamped()
             pose_msg.header.stamp = self.get_clock().now().to_msg()
-            pose_msg.header.frame_id = 'map'
+            pose_msg.header.frame_id = self.map_frame
             pose_msg.pose.pose.position.x = corrected_x
             pose_msg.pose.pose.position.y = corrected_y
             pose_msg.pose.pose.position.z = 0.0

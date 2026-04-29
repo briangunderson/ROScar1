@@ -259,6 +259,17 @@ export function initTF(getRosFn) {
   getRos = getRosFn;
   onAppEvent((ev) => {
     if (ev === 'connected') subscribe();
+    else if (ev === 'disconnected') {
+      // Drop stale frame entries — when the next connection brings up a
+      // different node graph (e.g. SLAM vs Nav2), we don't want ghost frames
+      // hanging around in the tree visualizer.
+      unsub();
+      frames.clear();
+      lastStructureKey = '';
+      if (stalenessTimer) { clearInterval(stalenessTimer); stalenessTimer = null; }
+      const container = document.getElementById('tf-tree');
+      if (container) container.innerHTML = '';
+    }
   });
 
   // Re-fit the tree whenever the container resizes

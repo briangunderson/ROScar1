@@ -19,7 +19,14 @@ let mapToOdom = null;   // {tx, ty, yaw} — latest map→odom transform from sl
 let lastTFTime = 0;     // timestamp of last map→odom TF update
 const TF_STALE_MS = 5000; // ignore map→odom if stale
 let mapData  = null;    // {width, height, resolution, origin, data[]}
+let mapDataVersion = 0; // bumped each time /map publishes new data
 let robotPos = null;    // {x, y, yaw}
+
+// Offscreen canvas cache — rebuilt only when grid data changes, NOT every
+// RAF tick. In locked-to-robot mode needsDraw fires at ~20Hz (10Hz odom +
+// 10Hz TF), but the OccupancyGrid itself only updates on /map publish.
+let offscreenCache = null;       // HTMLCanvasElement or null
+let offscreenCacheVersion = -1;  // mapDataVersion the cache was built from
 
 // View transform (canvas pixels per map pixel)
 let viewScale  = 1.0;
@@ -33,6 +40,14 @@ let robotLocked = false;
 let navGoalMode = false;
 let goalActionClient = null;
 let goalHandle      = null;
+
+// AMCL initial-pose seeding: when initPoseMode is true, a click publishes
+// to /initialpose instead of sending a nav goal. Click-and-drag sets
+// orientation (drag direction = robot heading). Mutually exclusive with
+// navGoalMode.
+let initPoseMode = false;
+let initialPoseTopic = null;
+let initPoseDrag = null;  // {x0, y0, x1, y1} canvas coords during drag
 
 // Landmark markers from /landmark/known_markers
 let landmarkSub = null;
@@ -60,6 +75,9 @@ export function clearMap() {
   robotPos = null;
   mapToOdom = null;
   lastTFTime = 0;
+  // Invalidate the offscreen cache so a future /map publish rebuilds it.
+  offscreenCache = null;
+  offscreenCacheVersion = -1;
   needsDraw = true;
 }
 
@@ -67,9 +85,19 @@ export function clearMap() {
 function subscribeMap() {
   const ros = getRos(); if (!ros) return;
   if (mapSub) { try { mapSub.unsubscribe(); } catch (_) {} }
+  // QoS note: slam_toolbox publishes /map with TRANSIENT_LOCAL durability so
+  // late-joining subscribers immediately receive the latest map. The bundled
+  // roslibjs (web/js/lib/roslib.min.js) does NOT accept a `qos` or
+  // `durability` field on ROSLIB.Topic — its only ctor knobs are
+  // {name, messageType, compression, throttle_rate, latch, queue_size,
+  // queue_length, reconnect_on_close}. Setting `latch: true` causes
+  // rosbridge_server to negotiate a TRANSIENT_LOCAL+RELIABLE subscription on
+  // the ROS side, so we do receive the latched map immediately on connect
+  // (rather than waiting up to 5s for slam_toolbox's periodic republish).
   mapSub = new ROSLIB.Topic({
     ros, name: '/map', messageType: 'nav_msgs/OccupancyGrid',
     throttle_rate: 1000,
+    latch: true,
   });
   let prevW = 0, prevH = 0;
   let prevOriginX = null, prevOriginY = null;
@@ -83,6 +111,9 @@ function subscribeMap() {
       origin: msg.info.origin.position,
       data: Array.from(msg.data),
     };
+    // Bump version so drawMap rebuilds its offscreen canvas exactly once
+    // per /map publish, not every RAF tick.
+    mapDataVersion++;
     setEl('map-size-disp', `${w}\u00d7${h}`);
     setEl('map-res-disp',  `${(msg.info.resolution * 100).toFixed(0)}cm`);
     // Re-fit view when map dimensions or origin change (grid expanded by SLAM)
@@ -166,9 +197,20 @@ function subscribeLandmarks() {
 
 function setupGoalClient() {
   const ros = getRos(); if (!ros) return;
+  // Bundled roslibjs (web/js/lib/roslib.min.js) exposes ActionClient + Goal
+  // (legacy API). Use those — ROSLIB.Action / .ActionGoal don't exist here.
   goalActionClient = new ROSLIB.ActionClient({
-    ros, serverName: '/navigate_to_pose',
+    ros,
+    serverName: '/navigate_to_pose',
     actionName: 'nav2_msgs/action/NavigateToPose',
+  });
+}
+
+function setupInitialPoseTopic() {
+  const ros = getRos(); if (!ros) return;
+  initialPoseTopic = new ROSLIB.Topic({
+    ros, name: '/initialpose',
+    messageType: 'geometry_msgs/PoseWithCovarianceStamped',
   });
 }
 
@@ -257,27 +299,35 @@ function drawMap() {
   // In locked mode, recompute viewOffset each frame to track the robot
   if (robotLocked) computeLockedOffset(c);
 
-  // Render OccupancyGrid as ImageData
-  const imgData = ctx.createImageData(mapData.width, mapData.height);
-  const d = imgData.data;
-  for (let i = 0; i < mapData.data.length; i++) {
-    const v = mapData.data[i];
-    const base = i * 4;
-    if (v === -1) {       // unknown
-      d[base] = 13; d[base + 1] = 34; d[base + 2] = 51; d[base + 3] = 255;
-    } else if (v === 0) { // free
-      d[base] = 8;  d[base + 1] = 17; d[base + 2] = 26; d[base + 3] = 255;
-    } else {              // occupied (1-100)
-      const bright = Math.floor(180 * v / 100);
-      d[base] = bright; d[base + 1] = bright; d[base + 2] = bright; d[base + 3] = 255;
+  // Build offscreen canvas only when the underlying grid data changes.
+  // The transform/draw onto the visible canvas still runs every RAF tick,
+  // but we no longer allocate ImageData + a canvas per frame in locked mode.
+  if (!offscreenCache
+      || offscreenCacheVersion !== mapDataVersion
+      || offscreenCache.width  !== mapData.width
+      || offscreenCache.height !== mapData.height) {
+    const imgData = ctx.createImageData(mapData.width, mapData.height);
+    const d = imgData.data;
+    for (let i = 0; i < mapData.data.length; i++) {
+      const v = mapData.data[i];
+      const base = i * 4;
+      if (v === -1) {       // unknown
+        d[base] = 13; d[base + 1] = 34; d[base + 2] = 51; d[base + 3] = 255;
+      } else if (v === 0) { // free
+        d[base] = 8;  d[base + 1] = 17; d[base + 2] = 26; d[base + 3] = 255;
+      } else {              // occupied (1-100)
+        const bright = Math.floor(180 * v / 100);
+        d[base] = bright; d[base + 1] = bright; d[base + 2] = bright; d[base + 3] = 255;
+      }
     }
+    const cv = document.createElement('canvas');
+    cv.width  = mapData.width;
+    cv.height = mapData.height;
+    cv.getContext('2d').putImageData(imgData, 0, 0);
+    offscreenCache = cv;
+    offscreenCacheVersion = mapDataVersion;
   }
-
-  // Draw via offscreen canvas for scaling
-  const offscreen = document.createElement('canvas');
-  offscreen.width  = mapData.width;
-  offscreen.height = mapData.height;
-  offscreen.getContext('2d').putImageData(imgData, 0, 0);
+  const offscreen = offscreenCache;
 
   ctx.save();
 
@@ -315,6 +365,37 @@ function drawMap() {
     } else {
       drawLandmarks(ctx);
     }
+  }
+
+  // Init-pose drag indicator (arrow from click point to current cursor)
+  if (initPoseDrag) {
+    const { x0, y0, x1, y1 } = initPoseDrag;
+    const dlen = Math.hypot(x1 - x0, y1 - y0);
+    ctx.save();
+    ctx.strokeStyle = '#00ffaa';
+    ctx.fillStyle   = '#00ffaa';
+    ctx.lineWidth   = 2;
+    // Origin dot
+    ctx.beginPath();
+    ctx.arc(x0, y0, 6, 0, Math.PI * 2);
+    ctx.fill();
+    if (dlen >= 10) {
+      // Arrow shaft
+      ctx.beginPath();
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
+      ctx.stroke();
+      // Arrowhead
+      const a = Math.atan2(y1 - y0, x1 - x0);
+      const ah = 12;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x1 - ah * Math.cos(a - 0.4), y1 - ah * Math.sin(a - 0.4));
+      ctx.lineTo(x1 - ah * Math.cos(a + 0.4), y1 - ah * Math.sin(a + 0.4));
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
   }
 }
 
@@ -501,40 +582,160 @@ function setupControls() {
   });
   document.getElementById('map-lock').addEventListener('click', toggleLock);
   document.getElementById('cancel-goal-btn').addEventListener('click', cancelGoal);
+  const initBtn = document.getElementById('map-init-pose');
+  if (initBtn) initBtn.addEventListener('click', () => setInitPoseMode(!initPoseMode));
 
   const c = getCanvas();
   if (!c) return;
 
-  // Pan via drag (disabled when locked)
+  // Track press start so mouseup can decide what action to take. We deliberately
+  // do NOT rely on the synthesized `click` event — it can be flaky when the
+  // cursor moves a few pixels between press and release.
+  let navPress = null;  // { x, y } canvas coords at mousedown for nav-goal
   c.addEventListener('mousedown', (e) => {
-    if (navGoalMode || robotLocked) return;
+    const rect = c.getBoundingClientRect();
+    const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
+    if (initPoseMode || e.shiftKey) {
+      initPoseDrag = { x0: cx, y0: cy, x1: cx, y1: cy, shiftStart: e.shiftKey };
+      needsDraw = true;
+      return;
+    }
+    if (navGoalMode) {
+      navPress = { x: cx, y: cy };
+      return;
+    }
+    if (robotLocked) return;
     dragging = true;
     dragStart = { x: e.clientX, y: e.clientY, ox: viewOffset.x, oy: viewOffset.y };
   });
   c.addEventListener('mousemove', (e) => {
+    if (initPoseDrag) {
+      const rect = c.getBoundingClientRect();
+      initPoseDrag.x1 = e.clientX - rect.left;
+      initPoseDrag.y1 = e.clientY - rect.top;
+      needsDraw = true;
+      return;
+    }
     if (!dragging) return;
     viewOffset.x = dragStart.ox + (e.clientX - dragStart.x);
     viewOffset.y = dragStart.oy + (e.clientY - dragStart.y);
     needsDraw = true;
   });
-  c.addEventListener('mouseup', () => { dragging = false; });
-  c.addEventListener('mouseleave', () => { dragging = false; });
+  c.addEventListener('mouseup', (e) => {
+    if (initPoseDrag) {
+      const dx = initPoseDrag.x1 - initPoseDrag.x0;
+      const dy = initPoseDrag.y1 - initPoseDrag.y0;
+      const dragLen = Math.hypot(dx, dy);
+      if (dragLen < 10) {
+        sendInitialPose(initPoseDrag.x0, initPoseDrag.y0);
+      } else {
+        sendInitialPoseDrag(initPoseDrag.x0, initPoseDrag.y0,
+                             initPoseDrag.x1, initPoseDrag.y1);
+      }
+      initPoseDrag = null;
+      needsDraw = true;
+      return;
+    }
+    if (navPress) {
+      const rect = c.getBoundingClientRect();
+      const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
+      // Tolerate a few px of mouse jitter between mousedown and mouseup.
+      if (Math.hypot(cx - navPress.x, cy - navPress.y) < 12 && mapData) {
+        sendNavGoal(navPress.x, navPress.y);
+      }
+      navPress = null;
+      return;
+    }
+    dragging = false;
+  });
+  c.addEventListener('mouseleave', () => {
+    initPoseDrag = null;
+    navPress = null;
+    dragging = false;
+    needsDraw = true;
+  });
 
-  // Touch pan (disabled when locked)
+  // Touch handlers — mirror the mouse press-tracking so tablet users can also
+  // drop nav goals and seed the initial pose. touchstart/touchmove/touchend
+  // are NOT passive here because we may need preventDefault() to suppress the
+  // synthesized `click` (and stop the page from scrolling/pinch-zooming
+  // during a goal tap).
   let touchStart = null;
   c.addEventListener('touchstart', (e) => {
-    if (navGoalMode || robotLocked || e.touches.length !== 1) return;
+    if (e.touches.length !== 1) return;
     const t = e.touches[0];
+    const rect = c.getBoundingClientRect();
+    const cx = t.clientX - rect.left, cy = t.clientY - rect.top;
+
+    if (initPoseMode) {
+      initPoseDrag = { x0: cx, y0: cy, x1: cx, y1: cy, shiftStart: false };
+      needsDraw = true;
+      e.preventDefault();
+      return;
+    }
+    if (navGoalMode) {
+      // Reuse the same press state that mouse handlers use, so tap-to-go
+      // behaves identically across input modalities.
+      navPress = { x: cx, y: cy };
+      e.preventDefault();
+      return;
+    }
+    if (robotLocked) return;
     touchStart = { x: t.clientX, y: t.clientY, ox: viewOffset.x, oy: viewOffset.y };
-  }, { passive: true });
+  }, { passive: false });
   c.addEventListener('touchmove', (e) => {
-    if (!touchStart || e.touches.length !== 1) return;
+    if (e.touches.length !== 1) return;
     const t = e.touches[0];
+    if (initPoseDrag) {
+      const rect = c.getBoundingClientRect();
+      initPoseDrag.x1 = t.clientX - rect.left;
+      initPoseDrag.y1 = t.clientY - rect.top;
+      needsDraw = true;
+      e.preventDefault();
+      return;
+    }
+    if (!touchStart) return;
     viewOffset.x = touchStart.ox + (t.clientX - touchStart.x);
     viewOffset.y = touchStart.oy + (t.clientY - touchStart.y);
     needsDraw = true;
-  }, { passive: true });
-  c.addEventListener('touchend', () => { touchStart = null; });
+  }, { passive: false });
+  c.addEventListener('touchend', (e) => {
+    // Use changedTouches because touches[] is empty after the last finger lifts
+    const t = e.changedTouches && e.changedTouches[0];
+    if (initPoseDrag) {
+      const dx = initPoseDrag.x1 - initPoseDrag.x0;
+      const dy = initPoseDrag.y1 - initPoseDrag.y0;
+      const dragLen = Math.hypot(dx, dy);
+      if (dragLen < 10) {
+        sendInitialPose(initPoseDrag.x0, initPoseDrag.y0);
+      } else {
+        sendInitialPoseDrag(initPoseDrag.x0, initPoseDrag.y0,
+                             initPoseDrag.x1, initPoseDrag.y1);
+      }
+      initPoseDrag = null;
+      needsDraw = true;
+      e.preventDefault();
+      return;
+    }
+    if (navPress && t) {
+      const rect = c.getBoundingClientRect();
+      const cx = t.clientX - rect.left, cy = t.clientY - rect.top;
+      // Same 12-px slop as mouseup so tap jitter doesn't kill the goal.
+      if (Math.hypot(cx - navPress.x, cy - navPress.y) < 12 && mapData) {
+        sendNavGoal(navPress.x, navPress.y);
+      }
+      navPress = null;
+      e.preventDefault();
+      return;
+    }
+    touchStart = null;
+  }, { passive: false });
+  c.addEventListener('touchcancel', () => {
+    touchStart = null;
+    navPress = null;
+    initPoseDrag = null;
+    needsDraw = true;
+  });
 
   // Scroll zoom (toward cursor in free mode, centered in locked mode)
   c.addEventListener('wheel', (e) => {
@@ -546,14 +747,9 @@ function setupControls() {
     zoomAtPoint(factor, cx, cy);
   }, { passive: false });
 
-  // Nav goal on click
-  c.addEventListener('click', (e) => {
-    if (!navGoalMode || !mapData) return;
-    const rect = c.getBoundingClientRect();
-    const cx = e.clientX - rect.left;
-    const cy = e.clientY - rect.top;
-    sendNavGoal(cx, cy);
-  });
+  // (No `click` handler — nav goals fire from mouseup so they survive small
+  // mouse jitter between press and release. Init pose drag also handled in
+  // mouseup above.)
 }
 
 // ── Nav2 goal ───────────────────────────────────────────────────────────────
@@ -578,8 +774,11 @@ function sendNavGoal(canvasX, canvasY) {
   const wx  = mapData.origin.x + mpx * mapData.resolution;
   const wy  = mapData.origin.y + mpy * mapData.resolution;
 
-  const goal = new ROSLIB.ActionGoal({
-    goal: {
+  // Legacy ROSLIB.Goal API: construct Goal bound to client, attach event
+  // handlers, then send().
+  goalHandle = new ROSLIB.Goal({
+    actionClient: goalActionClient,
+    goalMessage: {
       pose: {
         header: { frame_id: 'map' },
         pose: {
@@ -589,27 +788,27 @@ function sendNavGoal(canvasX, canvasY) {
       },
     },
   });
-
-  goalHandle = goalActionClient.sendGoal(
-    goal,
-    (result) => {
-      goalHandle = null;
-      toast('Goal reached!', 'ok');
-      updateGoalUI();
-    },
-    (feedback) => { /* could show progress */ },
-  );
+  goalHandle.on('result', () => {
+    goalHandle = null;
+    toast('Goal reached!', 'ok');
+    updateGoalUI();
+  });
+  // No-op feedback handler (could surface ETA / distance remaining later).
+  goalHandle.on('feedback', () => {});
+  goalHandle.send();
 
   toast(`Nav goal: (${wx.toFixed(2)}, ${wy.toFixed(2)})`, 'ok');
-  // Exit goal-picking mode but show cancel button (goal is now active)
+  // Exit goal-picking mode but keep the cancel button visible.
   navGoalMode = false;
   updateGoalUI();
 }
 
 function cancelGoal() {
-  if (goalHandle) { try { goalHandle.cancel(); } catch (_) {} goalHandle = null; }
+  if (goalHandle) {
+    try { goalHandle.cancel(); } catch (_) {}
+    goalHandle = null;
+  }
   toast('Goal cancelled');
-  // Return to goal-picking mode if in a nav-capable mode
   navGoalMode = true;
   updateGoalUI();
 }
@@ -617,20 +816,105 @@ function cancelGoal() {
 function setNavGoalMode(on) {
   navGoalMode = on;
   if (on && !goalActionClient) setupGoalClient();
+  // Mutually exclusive with init-pose mode
+  if (on) initPoseMode = false;
   updateGoalUI();
 }
 
-/** Update hint, cancel button visibility, and cursor based on current state. */
+// ── AMCL initial pose ──────────────────────────────────────────────────────
+/** Plain-click init-pose: position only, yaw from current TF (best guess). */
+function sendInitialPose(canvasX, canvasY) {
+  if (!initialPoseTopic) setupInitialPoseTopic();
+  if (!initialPoseTopic || !mapData) { toast('rosbridge not connected', 'err'); return; }
+  const p = canvasToWorld(canvasX, canvasY);
+  const yaw = (robotPos && typeof robotPos.yaw === 'number') ? robotPos.yaw : 0;
+  publishInitialPose(p.x, p.y, yaw);
+  toast(`Initial pose: (${p.x.toFixed(2)}, ${p.y.toFixed(2)}) ` +
+        `yaw=${(yaw * 180 / Math.PI).toFixed(0)}° (from TF — drag to set explicitly)`, 'ok');
+  setInitPoseMode(false);
+}
+
+/** Convert canvas (cx,cy) to world (wx,wy) using the same inverse as sendNavGoal. */
+function canvasToWorld(cx, cy) {
+  let ux = cx, uy = cy;
+  if (robotLocked && robotPos) {
+    const c = getCanvas();
+    const ccx = c.width / 2, ccy = c.height / 2;
+    const dx = cx - ccx, dy = cy - ccy;
+    const cosA = Math.cos(-robotPos.yaw), sinA = Math.sin(-robotPos.yaw);
+    ux = dx * cosA - dy * sinA + ccx;
+    uy = dx * sinA + dy * cosA + ccy;
+  }
+  const mpx = mapData.width  - (uy - viewOffset.y) / viewScale;
+  const mpy = mapData.height - (ux - viewOffset.x) / viewScale;
+  return {
+    x: mapData.origin.x + mpx * mapData.resolution,
+    y: mapData.origin.y + mpy * mapData.resolution,
+  };
+}
+
+/** Click-and-drag init-pose: position from start, yaw from drag direction. */
+function sendInitialPoseDrag(cx0, cy0, cx1, cy1) {
+  if (!initialPoseTopic) setupInitialPoseTopic();
+  if (!initialPoseTopic || !mapData) { toast('rosbridge not connected', 'err'); return; }
+  const p0 = canvasToWorld(cx0, cy0);
+  const p1 = canvasToWorld(cx1, cy1);
+  const yaw = Math.atan2(p1.y - p0.y, p1.x - p0.x);
+  publishInitialPose(p0.x, p0.y, yaw);
+  toast(`Initial pose: (${p0.x.toFixed(2)}, ${p0.y.toFixed(2)}) ` +
+        `yaw=${(yaw * 180 / Math.PI).toFixed(0)}°`, 'ok');
+  setInitPoseMode(false);
+}
+
+/** Shared publish helper. */
+function publishInitialPose(wx, wy, yaw) {
+  const qz = Math.sin(yaw / 2.0);
+  const qw = Math.cos(yaw / 2.0);
+  // Tighter covariance when user explicitly set yaw via drag — give AMCL
+  // less room to wander; loose enough that scan match still refines.
+  const cov = new Array(36).fill(0);
+  cov[0]  = 0.10 * 0.10;
+  cov[7]  = 0.10 * 0.10;
+  cov[35] = (Math.PI / 12) * (Math.PI / 12);
+  initialPoseTopic.publish(new ROSLIB.Message({
+    header: { frame_id: 'map' },
+    pose: {
+      pose: {
+        position: { x: wx, y: wy, z: 0 },
+        orientation: { x: 0, y: 0, z: qz, w: qw },
+      },
+      covariance: cov,
+    },
+  }));
+}
+
+function setInitPoseMode(on) {
+  initPoseMode = on;
+  if (on && !initialPoseTopic) setupInitialPoseTopic();
+  if (on) navGoalMode = false;  // mutually exclusive
+  updateGoalUI();
+}
+
+/** Update hint, cancel button visibility, button states, and cursor. */
 function updateGoalUI() {
   const hint = document.getElementById('nav-goal-hint');
   const btn  = document.getElementById('cancel-goal-btn');
+  const initBtn = document.getElementById('map-init-pose');
   const c    = getCanvas();
-  // Show hint when in goal-picking mode and no active goal
-  if (hint) hint.classList.toggle('hidden', !navGoalMode || goalHandle);
-  // Show cancel button when a goal is active
+  if (hint) {
+    if (initPoseMode) {
+      hint.textContent = 'CLICK + DRAG TO SET INITIAL POSE (drag = robot heading)';
+      hint.classList.remove('hidden');
+    } else if (navGoalMode && !goalHandle) {
+      hint.textContent = 'TAP MAP TO SET GOAL';
+      hint.classList.remove('hidden');
+    } else {
+      hint.classList.add('hidden');
+    }
+  }
   if (btn)  btn.classList.toggle('hidden', !goalHandle);
-  // Crosshair cursor when picking a goal
-  if (c) c.style.cursor = navGoalMode ? 'crosshair' : '';
+  if (initBtn) initBtn.classList.toggle('active', initPoseMode);
+  if (c) c.style.cursor = (navGoalMode || initPoseMode) ? 'crosshair' : '';
 }
 
 function setEl(id, val) {

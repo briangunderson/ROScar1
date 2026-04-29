@@ -13,10 +13,16 @@ Motor mapping (from STM32 firmware):
   M4 = rear-right   (TIM3)
 """
 
-import time
+import os
 import sys
+import time
 
-sys.path.insert(0, '/home/brian/.local/lib/python3.12/dist-packages')
+# Rosmaster_Lib is installed via `python3 setup.py install --user` so it lands
+# in the user's local site-packages. Resolve the current Python's user-site
+# rather than hardcoding a path that breaks on a different user / Python minor.
+import site
+sys.path.insert(0, site.getusersitepackages())
+
 from Rosmaster_Lib import Rosmaster
 
 SERIAL_PORT = '/dev/roscar_board'
@@ -141,4 +147,24 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    # Wrap main so a Ctrl-C mid-test still stops the motors before exit —
+    # otherwise the robot keeps spinning a wheel until something else
+    # times out the watchdog or yanks power.
+    bot_for_cleanup = None
+    try:
+        # main() owns its own bot, but we shadow it via a sentinel so the
+        # finally block below has SOMETHING to grab. Cleaner approach is to
+        # refactor main() to expose its bot — but a try/except wrapping
+        # main() and constructing a fresh stop-only client on KeyboardInterrupt
+        # is enough for a diagnostic script.
+        main()
+    except KeyboardInterrupt:
+        print("\n[motor_test] Ctrl-C — stopping motors before exit.")
+        try:
+            stop_bot = Rosmaster(car_type=1, com=SERIAL_PORT, delay=0.002, debug=False)
+            stop_bot.set_car_motion(0.0, 0.0, 0.0)
+            stop_bot.reset_car_state()
+        except Exception as exc:
+            print(f"[motor_test] WARNING: could not open serial to stop motors: {exc}")
+            print("[motor_test] Power-cycle the board if any wheel is still spinning.")
+        sys.exit(130)

@@ -12,19 +12,23 @@ echo " ROScar1 - Raspberry Pi 5 Setup"
 echo "========================================="
 
 # ---- 1. System updates ----
-echo "[1/6] Updating system packages..."
+echo "[1/8] Updating system packages..."
 apt update && apt upgrade -y
 
 # ---- 2. Install ROS2 Jazzy ----
-echo "[2/6] Installing ROS2 Jazzy Jalisco..."
+echo "[2/8] Installing ROS2 Jazzy Jalisco..."
 
-# Add ROS2 apt repository
+# Add ROS2 apt repository (idempotent — only re-write if missing)
 apt install -y software-properties-common curl
-curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key | \
-    gpg --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
-    http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | \
-    tee /etc/apt/sources.list.d/ros2.list > /dev/null
+if [ ! -f /usr/share/keyrings/ros-archive-keyring.gpg ]; then
+    curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key | \
+        gpg --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg
+fi
+if [ ! -f /etc/apt/sources.list.d/ros2.list ]; then
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
+        http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | \
+        tee /etc/apt/sources.list.d/ros2.list > /dev/null
+fi
 apt update
 
 # Install ROS2 base (no GUI) + dev tools
@@ -35,7 +39,7 @@ apt install -y \
     python3-rosdep
 
 # ---- 3. Install ROS2 packages ----
-echo "[3/6] Installing ROS2 dependencies..."
+echo "[3/8] Installing ROS2 dependencies..."
 apt install -y \
     ros-jazzy-teleop-twist-keyboard \
     ros-jazzy-teleop-twist-joy \
@@ -53,14 +57,14 @@ apt install -y \
     python3-serial
 
 # ---- 4. Initialize rosdep ----
-echo "[4/6] Initializing rosdep..."
+echo "[4/8] Initializing rosdep..."
 if [ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]; then
     rosdep init
 fi
 sudo -u "${SUDO_USER:-$USER}" rosdep update
 
 # ---- 5. Install udev rules ----
-echo "[5/6] Installing udev rules..."
+echo "[5/8] Installing udev rules..."
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cp "${SCRIPT_DIR}/udev/99-roscar.rules" /etc/udev/rules.d/
 udevadm control --reload-rules

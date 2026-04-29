@@ -11,6 +11,10 @@ import { clearMap } from './aio-map.js';
 const BATT_MIN = 10.0;
 const BATT_MAX = 12.6;
 const R2D      = 180 / Math.PI;
+// launch_manager_node looks for maps under ~/maps/. The Pi user is `brian`
+// (per scripts/setup_rpi.sh), but we keep the path centralised here so the
+// magic string isn't buried inside the apply-mode click handler.
+const MAPS_DIR = '/home/brian/maps';
 
 // ── State ───────────────────────────────────────────────────────────────────
 const subs        = [];
@@ -19,6 +23,11 @@ let saveMapSvc    = null;
 let listMapsSvc   = null;
 let currentMode   = 'idle';
 let navGoalCallback = null;
+// Last-saved map path, populated from /web/save_map's response. When the user
+// then picks "navigation" + that same map name from the dropdown, we reuse
+// this exact path instead of rebuilding it from MAPS_DIR + name.
+let lastSavedMapPath = null;
+let lastSavedMapName = null;
 
 // ── Data callbacks for graphs module ────────────────────────────────────────
 const odomCbs = [];
@@ -237,8 +246,13 @@ function setupModeButtons() {
         showMsg(statusMsg, 'Select a map first', 'err');
         return;
       }
-      // Build full path: ~/maps/<name>.yaml
-      const mapPath = `/home/brian/maps/${selected}.yaml`;
+      // Prefer the path returned from /web/save_map if the user is loading
+      // the map they just saved — that's the authoritative path the server
+      // reported. Otherwise build it from MAPS_DIR (a centralised constant
+      // instead of an inline magic string).
+      const mapPath = (lastSavedMapName === selected && lastSavedMapPath)
+        ? lastSavedMapPath
+        : `${MAPS_DIR}/${selected}.yaml`;
       requestSetMode('navigation', mapPath, statusMsg);
       if (navMapSelect) navMapSelect.classList.add('hidden');
     });
@@ -338,6 +352,10 @@ function setupMapSave() {
     const req = new ROSLIB.ServiceRequest({ map_name: mapName });
     saveMapSvc.callService(req, (resp) => {
       if (resp.success) {
+        // Cache the authoritative path from the server so a subsequent
+        // "navigation" click on the same map uses the exact same path.
+        lastSavedMapPath = resp.path || null;
+        lastSavedMapName = mapName;
         showMsg(msgEl, `Saved: ${resp.path}`, 'ok');
         toast('Map saved!', 'ok');
       } else {

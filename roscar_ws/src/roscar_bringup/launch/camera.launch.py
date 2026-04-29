@@ -1,10 +1,14 @@
 """Launch the camera node.
 
 Supports two backends:
-  - 'csi' (default): RPi Camera Module v2 (IMX219) via camera_ros (libcamera)
+  - 'csi' (default): RPi Camera Module (OV5647/IMX219/IMX708) via camera_ros (libcamera)
   - 'usb': USB webcam via v4l2_camera (V4L2)
 
-Set camera_type:=usb to fall back to the Logitech webcam.
+Set camera_type:=usb to fall back to a USB webcam.
+
+NOTE: camera_ros was built from source against a custom libcamera (with PiSP
+pipeline support for Pi5).  The env vars below point to the locally-installed
+libcamera libraries so the node can find the correct IPA modules at runtime.
 """
 
 import os
@@ -30,6 +34,7 @@ def _launch_camera(context):
             'height': height,
             'format': 'RGB888',
             'frame_id': 'camera_optical_frame',
+            'jpeg_quality': 30,
         }
         if camera_info_url:
             params['camera_info_url'] = camera_info_url
@@ -47,6 +52,14 @@ def _launch_camera(context):
                     ('~/image_raw/compressed', '/image_raw/compressed'),
                 ],
                 output='screen',
+                additional_env={
+                    'LD_LIBRARY_PATH': '/usr/local/lib/aarch64-linux-gnu:'
+                                       + os.environ.get('LD_LIBRARY_PATH', ''),
+                    'LIBCAMERA_IPA_MODULE_PATH':
+                        '/usr/local/lib/aarch64-linux-gnu/libcamera/ipa',
+                    'LIBCAMERA_IPA_PROXY_PATH':
+                        '/usr/local/libexec/libcamera',
+                },
             ),
         ]
     else:
@@ -55,7 +68,6 @@ def _launch_camera(context):
         params = {
             'video_device': video_device,
             'image_size': [width, height],
-            'io_method': 'read',
             'camera_frame_id': 'camera_optical_frame',
         }
         if camera_info_url:
@@ -79,7 +91,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument(
-            'camera_type', default_value='csi',
+            'camera_type', default_value='usb',
             description='Camera backend: "csi" (RPi Camera Module) or "usb" (USB webcam)',
         ),
         DeclareLaunchArgument(

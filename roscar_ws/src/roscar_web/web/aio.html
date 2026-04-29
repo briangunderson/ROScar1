@@ -87,6 +87,7 @@
           <span id="map-res-disp" class="mono">--cm</span>
         </span>
         <span class="panel-title-actions">
+          <button class="sm-btn" id="map-init-pose" title="Set AMCL initial pose by clicking the map (or Shift+click)">INIT</button>
           <button class="sm-btn" id="map-lock" title="Lock to robot (heading up)">L</button>
           <button class="sm-btn" id="map-zoom-in" title="Zoom In">+</button>
           <button class="sm-btn" id="map-zoom-out" title="Zoom Out">-</button>
@@ -321,6 +322,13 @@
   <!-- ═══════════════════ SCRIPTS ═══════════════════ -->
   <script src="js/lib/roslib.min.js"></script>
   <script src="js/lib/nipplejs.min.js"></script>
+  <!-- NOTE: do NOT add a ?v=... cache-bust to this script tag. Child
+       modules import ./aio-app.js without the query, so Chrome sees
+       two distinct module URLs and evaluates the entire graph twice —
+       every init* function fires twice, every click handler is
+       attached twice, etc. The no-cache HTTP headers from http_server
+       are sufficient; a Ctrl+Shift+R after JS changes picks up fresh
+       bytes without the duplicate-evaluation bug. -->
   <script type="module" src="js/aio-app.js"></script>
 </body>
 </html>

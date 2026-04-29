@@ -12,9 +12,14 @@ import signal
 import subprocess
 import threading
 import time
+import math
 
 import rclpy
 from rclpy.node import Node
+from rclpy.duration import Duration
+
+from geometry_msgs.msg import PoseWithCovarianceStamped
+from tf2_ros import Buffer, TransformListener
 
 import glob as globmod
 
@@ -40,6 +45,21 @@ class LaunchManagerNode(Node):
         self._process = None          # subprocess.Popen of active launch
         self._process_lock = threading.Lock()
 
+        # Cancellation flag for the slam→nav carryover background thread.
+        # set() any time the user changes mode so an in-flight carryover
+        # publisher stops before publishing /initialpose into the wrong mode.
+        self._carryover_cancel = threading.Event()
+        self._carryover_cancel.set()  # idle: no carryover in flight
+
+        # TF + initial-pose publisher used to carry the robot's pose across a
+        # slam → navigation handoff. Without this, AMCL starts at the
+        # nav2_params default (0,0,0) and the robot ends up localized in
+        # the wrong place on the just-saved map.
+        self._tf_buffer = Buffer()
+        self._tf_listener = TransformListener(self._tf_buffer, self)
+        self._initialpose_pub = self.create_publisher(
+            PoseWithCovarianceStamped, '/initialpose', 10)
+
         self._set_mode_srv = self.create_service(
             SetMode, '/web/set_mode', self._set_mode_callback)
         self._save_map_srv = self.create_service(
@@ -57,6 +77,16 @@ class LaunchManagerNode(Node):
 
     def _set_mode_callback(self, request, response):
         mode = request.mode.strip()
+        self.get_logger().info(
+            f'set_mode request received: mode={mode!r} '
+            f'map_path={request.map_path!r} use_depth={request.use_depth}'
+        )
+
+        # Any mode change cancels an in-flight carryover publisher. The bg
+        # thread checks this between sleeps and before each publish, so we
+        # set it here unconditionally (before validation) to make sure even
+        # rapid bounces (slam_nav→navigation→teleop) interrupt cleanly.
+        self._carryover_cancel.set()
 
         if mode not in AVAILABLE_MODES:
             response.success = False
@@ -81,6 +111,26 @@ class LaunchManagerNode(Node):
                     return response
                 cmd.append(f'map:={map_path}')
 
+            # Forward use_depth to any mode — all four parent launch files
+            # (teleop=robot, slam, navigation, slam_nav) declare the arg.
+            cmd.append(f'use_depth:={"true" if request.use_depth else "false"}')
+
+        # Capture current robot pose if we're transitioning slam* → navigation
+        # so AMCL can start localized where slam_toolbox left the robot,
+        # rather than at the (0,0,0) default in nav2_params.yaml.
+        carryover_pose = None
+        if mode == 'navigation' and self._current_mode in ('slam', 'slam_nav'):
+            carryover_pose = self._snapshot_map_pose()
+            if carryover_pose:
+                self.get_logger().info(
+                    f'Captured slam→nav pose carryover: '
+                    f'x={carryover_pose[0]:.2f} y={carryover_pose[1]:.2f} '
+                    f'yaw={math.degrees(carryover_pose[2]):.0f}°')
+            else:
+                self.get_logger().warn(
+                    'slam→nav transition: could not capture map→base_footprint, '
+                    'AMCL will start at nav2_params default')
+
         # Stop current launch
         self._stop_current()
 
@@ -101,9 +151,112 @@ class LaunchManagerNode(Node):
                 return response
 
         self._current_mode = mode
+
+        # Schedule delayed /initialpose publish so AMCL has time to come up
+        # via lifecycle_manager. We publish multiple times across the window
+        # in case the first one races AMCL's subscription readiness.
+        # Clear the cancel flag right before launching so the new thread is
+        # allowed to run; any subsequent _set_mode_callback will set() it
+        # again and interrupt this thread.
+        if carryover_pose:
+            self._carryover_cancel.clear()
+            threading.Thread(
+                target=self._publish_carryover_pose,
+                args=(carryover_pose,),
+                daemon=True,
+            ).start()
+
         response.success = True
         response.message = f'Switched to {mode}'
         return response
+
+    def _snapshot_map_pose(self):
+        """Look up map → base_footprint, return (x, y, yaw) or None on failure.
+
+        slam_toolbox's map→odom publish is bursty — it pauses between scan
+        matches and may briefly be >1s stale. A single 1s-timeout lookup can
+        extrapolate-fail in that gap, so we retry within a ~1s budget and
+        only log+return None if every attempt fails. We never raise out of
+        here: callers fall back to "no carryover" rather than failing the
+        service call.
+        """
+        deadline = time.monotonic() + 1.0
+        attempt = 0
+        last_err = None
+        while time.monotonic() < deadline:
+            attempt += 1
+            try:
+                tf = self._tf_buffer.lookup_transform(
+                    'map', 'base_footprint',
+                    rclpy.time.Time(),                # latest available
+                    timeout=Duration(seconds=0.3),
+                )
+                x = tf.transform.translation.x
+                y = tf.transform.translation.y
+                qz = tf.transform.rotation.z
+                qw = tf.transform.rotation.w
+                yaw = 2.0 * math.atan2(qz, qw)
+                if attempt > 1:
+                    self.get_logger().info(
+                        f'map→base_footprint TF acquired on attempt {attempt}')
+                return (x, y, yaw)
+            except Exception as e:
+                last_err = e
+                # Brief pause before retry — gives slam_toolbox time to
+                # publish the next map→odom update.
+                time.sleep(0.15)
+        self.get_logger().warn(
+            f'TF lookup map→base_footprint failed after {attempt} attempts: '
+            f'{last_err}')
+        return None
+
+    def _publish_carryover_pose(self, pose):
+        """Publish /initialpose at t+3, t+6, t+10 seconds after launch.
+
+        AMCL is brought up via lifecycle_manager (configure → activate)
+        after navigation.launch.py starts; it typically takes 5-10s before
+        the /initialpose subscription is ready. Publishing 3 times gives
+        whichever event comes first a chance to land.
+
+        Cancellation: we check self._carryover_cancel between sleeps and
+        before each publish. _set_mode_callback set()s this on every mode
+        change, so a user switching away from navigation mid-wait stops
+        further /initialpose publishes immediately. This avoids the prior
+        race where reading self._current_mode without a lock could let a
+        publish slip out after a mode change.
+        """
+        x, y, yaw = pose
+        msg = PoseWithCovarianceStamped()
+        msg.header.frame_id = 'map'
+        msg.pose.pose.position.x = float(x)
+        msg.pose.pose.position.y = float(y)
+        msg.pose.pose.orientation.z = float(math.sin(yaw / 2.0))
+        msg.pose.pose.orientation.w = float(math.cos(yaw / 2.0))
+        cov = [0.0] * 36
+        cov[0]  = 0.05 ** 2                # 5 cm σ — we trust this pose
+        cov[7]  = 0.05 ** 2
+        cov[35] = (math.pi / 36.0) ** 2    # 5° σ
+        msg.pose.covariance = cov
+
+        last = 0.0
+        for t in (3.0, 6.0, 10.0):
+            # Sleep in small slices so cancellation kicks in promptly even
+            # during the long t+10 leg.
+            target = time.monotonic() + (t - last)
+            last = t
+            while time.monotonic() < target:
+                if self._carryover_cancel.is_set():
+                    return
+                time.sleep(min(0.1, target - time.monotonic()))
+            if self._carryover_cancel.is_set():
+                return
+            msg.header.stamp = self.get_clock().now().to_msg()
+            try:
+                self._initialpose_pub.publish(msg)
+                self.get_logger().info(
+                    f'Published slam→nav carryover /initialpose (t+{t:.0f}s)')
+            except Exception as e:
+                self.get_logger().warn(f'/initialpose publish failed: {e}')
 
     def _save_map_callback(self, request, response):
         map_name = request.map_name.strip() or 'map'
@@ -127,6 +280,28 @@ class LaunchManagerNode(Node):
                 response.path = map_path + '.yaml'
                 response.message = f'Map saved to {map_path}.yaml'
                 self.get_logger().info(f'Map saved: {map_path}')
+                # Snapshot the live learned-markers file (if any) into a
+                # per-map sidecar. navigation.launch.py reads
+                # <map_path>.markers.yaml when this map is loaded for nav.
+                # Without this snapshot, markers learned during slam_nav
+                # would either be lost on relaunch or contaminate other
+                # maps via the shared global file.
+                live_markers = os.path.expanduser('~/roscar_ws/learned_markers.yaml')
+                sidecar = map_path + '.markers.yaml'
+                try:
+                    if os.path.exists(live_markers):
+                        import shutil
+                        shutil.copy2(live_markers, sidecar)
+                        self.get_logger().info(f'Markers snapshot saved: {sidecar}')
+                    else:
+                        # No markers learned this session — write an empty
+                        # sidecar so nav can't accidentally load a leftover
+                        # from an older session under the same map name.
+                        with open(sidecar, 'w') as f:
+                            f.write('{}\n')
+                        self.get_logger().info(f'No live markers; wrote empty sidecar {sidecar}')
+                except Exception as e:
+                    self.get_logger().warn(f'Failed to snapshot markers sidecar: {e}')
             else:
                 response.success = False
                 response.path = ''

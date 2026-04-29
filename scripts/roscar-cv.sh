@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 #
-# Launcher for the ROScar1 web stack (rosbridge + web_video_server +
-# launch_manager + http_server).  Called by the roscar-web.service
-# systemd unit on boot.
+# Launcher for the ROScar1 CV stack (ArUco + YOLO + web_video_server on 8081).
+# Runs on the dev workstation (WSL2) via the roscar-cv.service systemd unit,
+# NOT on the Pi. CV needs the GPU, so it lives off-board.
 #
 set -eo pipefail
 
 # Wait for a routable network interface before starting ROS2 nodes.
-# network-online.target can fire before an IP is actually assigned,
-# causing CycloneDDS to fail to bind and all nodes to crash.
+# In WSL2, networking is mirrored from Windows but can take a few seconds
+# to settle after the distro boots.
 MAX_WAIT=30
 waited=0
 while ! ip -4 route show default &>/dev/null; do
@@ -24,13 +24,11 @@ done
 source /opt/ros/jazzy/setup.bash
 source "$HOME/roscar_ws/install/setup.bash"
 
-# Use CycloneDDS for cross-machine discovery (Pi <-> dev workstation)
+# CycloneDDS unicast-peer discovery to reach the Pi.
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 export CYCLONEDDS_URI="file://$HOME/cyclonedds.xml"
 
-# Verify CycloneDDS can actually create a node before launching the
-# full stack. On boot, DDS shared-memory init can race even after the
-# network is up, causing "error creating node" in some/all nodes.
+# Probe DDS before launching — same race we hit on the Pi.
 MAX_DDS_WAIT=30
 dds_waited=0
 while ! python3 -c "import rclpy; rclpy.init(); n = rclpy.create_node('_dds_probe'); n.destroy_node(); rclpy.shutdown()" 2>/dev/null; do
@@ -43,4 +41,4 @@ while ! python3 -c "import rclpy; rclpy.init(); n = rclpy.create_node('_dds_prob
     dds_waited=$((dds_waited + 1))
 done
 
-exec ros2 launch roscar_web web.launch.py
+exec ros2 launch roscar_cv cv.launch.py
