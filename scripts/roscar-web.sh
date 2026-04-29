@@ -26,7 +26,7 @@ source "$HOME/roscar_ws/install/setup.bash"
 
 # Use CycloneDDS for cross-machine discovery (Pi <-> dev workstation)
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-export CYCLONEDDS_URI=file://$HOME/cyclonedds.xml
+export CYCLONEDDS_URI="file://$HOME/cyclonedds.xml"
 
 # Verify CycloneDDS can actually create a node before launching the
 # full stack. On boot, DDS shared-memory init can race even after the

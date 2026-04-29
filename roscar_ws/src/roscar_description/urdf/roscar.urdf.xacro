@@ -143,6 +143,17 @@
   <xacro:mecanum_wheel name="rear_right"  x_pos="${-wheel_x_offset}" y_pos="${-wheel_y_offset}"/>
 
   <!-- ==================== IMU Link ==================== -->
+  <!-- LIE WARNING: The Yahboom expansion board (and the IMU on it) is        -->
+  <!-- mounted 180° rotated about Z relative to base_link. We don't model     -->
+  <!-- that rotation here because the driver pre-rotates raw IMU data to      -->
+  <!-- base_link convention via sign flips on ax/ay/gx/gy/mx/my (plus separate-->
+  <!-- corrections for az/gz that aren't tied to the rotation: gravity sign   -->
+  <!-- convention and firmware gz inversion). Downstream nodes read /imu/data -->
+  <!-- already in base_link orientation, so a true imu_joint rpy="0 0 π" plus -->
+  <!-- driver sign corrections would double-rotate. If you ever stop the      -->
+  <!-- driver from compensating, set rpy="0 0 ${pi}" here AND drop the        -->
+  <!-- ax/ay/gx/gy/mx/my flips in driver_node.py — see CLAUDE.md "Hardware    -->
+  <!-- Orientation" for the full sign table.                                  -->
   <link name="imu_link"/>
 
   <joint name="imu_joint" type="fixed">

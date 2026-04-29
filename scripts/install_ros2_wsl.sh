@@ -68,21 +68,44 @@ fi
 echo ""
 echo "[5/5] Configuring CycloneDDS for cross-network discovery..."
 CYCLONE_CFG="$HOME/cyclonedds.xml"
-cat > "$CYCLONE_CFG" << 'XML'
+
+# Detect the LAN-facing interface IP. WSL2 mirrored mode picks up the
+# Windows host's LAN IP, but Docker Desktop frequently adds bridge
+# interfaces that CycloneDDS may bind to instead. We need an explicit
+# <NetworkInterface> hint so DDS picks the right one.
+WSL_LAN_IP="$(ip -4 -o addr show 2>/dev/null \
+    | awk '$2 !~ /^(lo|docker|br-|veth|tun)/ { for (i=1; i<=NF; i++) if ($i ~ /^[0-9]+\./) { split($i, a, "/"); print a[1]; exit } }')"
+if [ -z "${WSL_LAN_IP:-}" ]; then
+    echo "  WARNING: could not auto-detect a LAN IP — falling back to localhost-only"
+    echo "  (cross-machine ROS2 discovery will not work until you edit $CYCLONE_CFG"
+    echo "   and add a <NetworkInterface address=\"<your IP>\" /> entry)"
+    WSL_LAN_IP="127.0.0.1"
+else
+    echo "  Detected LAN IP: $WSL_LAN_IP"
+fi
+
+cat > "$CYCLONE_CFG" << XML
 <?xml version="1.0" encoding="UTF-8"?>
 <CycloneDDS xmlns="https://cdds.io/config">
   <Domain>
     <General>
-      <!-- Allow discovery across WSL2 <-> LAN (Pi) -->
-      <AllowMulticast>true</AllowMulticast>
-      <EnableMulticastLoopback>true</EnableMulticastLoopback>
+      <!-- Multicast doesn't reliably cross WSL2's bridge; use unicast peers. -->
+      <AllowMulticast>false</AllowMulticast>
+      <ExternalNetworkAddress>${WSL_LAN_IP}</ExternalNetworkAddress>
+      <!-- Pin DDS to the LAN-facing interface so it doesn't pick a Docker -->
+      <!-- bridge or vEthernet adapter and silently fail discovery.        -->
+      <Interfaces>
+        <NetworkInterface address="${WSL_LAN_IP}" />
+      </Interfaces>
     </General>
     <Discovery>
       <Peers>
+        <Peer address="localhost"/>
         <!-- ROScar1 Pi5 - update IP if it changes -->
         <Peer address="192.168.1.170"/>
       </Peers>
       <ParticipantIndex>auto</ParticipantIndex>
+      <MaxAutoParticipantIndex>120</MaxAutoParticipantIndex>
     </Discovery>
   </Domain>
 </CycloneDDS>

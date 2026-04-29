@@ -26,7 +26,7 @@ source "$HOME/roscar_ws/install/setup.bash"
 
 # CycloneDDS unicast-peer discovery to reach the Pi.
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-export CYCLONEDDS_URI=file://$HOME/cyclonedds.xml
+export CYCLONEDDS_URI="file://$HOME/cyclonedds.xml"
 
 # Probe DDS before launching — same race we hit on the Pi.
 MAX_DDS_WAIT=30
