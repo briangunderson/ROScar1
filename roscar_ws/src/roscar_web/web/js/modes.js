@@ -79,7 +79,13 @@ function requestSetMode(mode, mapPath, statusEl) {
 
   showMsg(statusEl, `Switching to ${mode.toUpperCase()}…`);
 
-  const req = new ROSLIB.ServiceRequest({ mode, map_path: mapPath });
+  // use_depth defaults true — the D435i is the sole camera now and is
+  // expected in every mode (teleop/slam/navigation/slam_nav).
+  const req = new ROSLIB.ServiceRequest({
+    mode,
+    map_path: mapPath,
+    use_depth: true,
+  });
   setModeSvc.callService(req, (resp) => {
     if (resp.success) {
       currentMode = mode;
