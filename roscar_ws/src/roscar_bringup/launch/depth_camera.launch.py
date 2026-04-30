@@ -87,7 +87,34 @@ def generate_launch_description():
         output='screen',
     )
 
+    # Cliff / dropoff detector — uses the same depth image stream to
+    # emit virtual obstacle points wherever the floor SHOULD be visible
+    # but isn't. Feeds a 3rd source on the local_costmap obstacle_layer
+    # (PointCloud2 instead of LaserScan, since cliffs project as a fan
+    # of points across the floor in front of the robot).
+    # See roscar_driver/roscar_driver/cliff_detector_node.py for the
+    # algorithm.
+    cliff_detector_node = Node(
+        package='roscar_driver',
+        executable='cliff_detector',
+        name='cliff_detector',
+        parameters=[{
+            'output_frame': 'base_link',
+            'camera_link_frame': 'camera_link',
+            'floor_tolerance_m': 0.05,
+            'min_cliff_drop_m': 0.10,
+            'max_detect_distance_m': 1.5,
+            'min_valid_depth_m': 0.30,
+            'col_stride': 4,
+            'row_stride': 4,
+            'treat_invalid_as_cliff': True,
+            'min_consecutive_cliff': 3,
+        }],
+        output='screen',
+    )
+
     return LaunchDescription([
         realsense_node,
         depth_to_scan_node,
+        cliff_detector_node,
     ])
