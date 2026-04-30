@@ -19,6 +19,7 @@ docs/superpowers/specs/2026-04-30-d435i-obstacle-avoidance.md.
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
+from launch.actions import TimerAction
 from launch_ros.actions import Node
 
 
@@ -51,13 +52,23 @@ def generate_launch_description():
     # that fills the gap between the floor and the lidar's scan plane —
     # exactly where tables, chair seats, low boxes, and short obstacles
     # live. Range is capped at 3 m (D435i's useful depth limit on this unit).
+    #
+    # STARTUP RACE: this node uses message_filters::TfFilter internally,
+    # which silently drops cloud frames if the camera→base_link static TF
+    # isn't already in its TF buffer when the first cloud arrives. Verified
+    # on hardware 2026-04-30: starting it concurrently with the realsense
+    # camera + URDF state publisher leaves it permanently silent — no errors
+    # logged, just no LaserScan output. Starting it ~10 s after the rest of
+    # the stack works reliably (the camera takes ~5 s to come online with
+    # initial_reset, and TFs need to propagate). The TimerAction wrapper
+    # below enforces that delay.
     depth_to_scan_node = Node(
         package='pointcloud_to_laserscan',
         executable='pointcloud_to_laserscan_node',
         name='depth_to_scan',
         parameters=[{
             'target_frame': 'base_link',
-            'transform_tolerance': 0.1,
+            'transform_tolerance': 0.5,  # generous: cloud stamps occasionally lag TFs by ~100 ms
             'min_height': 0.05,         # 5 cm above floor — skip floor noise
             'max_height': 0.50,         # up to top of robot body (below mast)
             'angle_min': -0.76,         # -43.5°, matches D435i depth FOV
@@ -78,5 +89,5 @@ def generate_launch_description():
 
     return LaunchDescription([
         realsense_node,
-        depth_to_scan_node,
+        TimerAction(period=10.0, actions=[depth_to_scan_node]),
     ])
