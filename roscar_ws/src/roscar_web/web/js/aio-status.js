@@ -309,7 +309,10 @@ function requestSetMode(mode, mapPath, statusEl) {
 
   showMsg(statusEl, `Switching to ${mode.toUpperCase()}...`);
 
-  const req = new ROSLIB.ServiceRequest({ mode, map_path: mapPath });
+  // use_depth defaults to true — D435i is the sole camera now and is expected
+  // in every mode. Without an explicit value, the SetMode bool field defaults
+  // to false and depth_camera.launch.py is skipped, leaving /image_raw silent.
+  const req = new ROSLIB.ServiceRequest({ mode, map_path: mapPath, use_depth: true });
   setModeSvc.callService(req, (resp) => {
     if (resp.success) {
       currentMode = mode;
@@ -406,7 +409,7 @@ function setupMapReset() {
       // Step 2: wait for old nodes to fully shut down, then restart SLAM
       showMsg(msgEl, 'Waiting for shutdown...');
       setTimeout(() => {
-      const restoreReq = new ROSLIB.ServiceRequest({ mode: restoreMode, map_path: '' });
+      const restoreReq = new ROSLIB.ServiceRequest({ mode: restoreMode, map_path: '', use_depth: true });
       setModeSvc.callService(restoreReq, (resp2) => {
         if (resp2.success) {
           currentMode = restoreMode;
