@@ -18,13 +18,25 @@ Save the map when done:
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
 
 
 def generate_launch_description():
     bringup_dir = get_package_share_directory('roscar_bringup')
     nav2_bringup_dir = get_package_share_directory('nav2_bringup')
+
+    # -- Launch arguments --
+    # use_depth defaults to true so the D435i's depth → /scan_depth pipeline
+    # contributes to the local costmap obstacle_layer alongside the lidar.
+    # Set to false to navigate on lidar alone.
+    use_depth_arg = DeclareLaunchArgument(
+        'use_depth', default_value='true',
+        description='Launch the Intel RealSense D435i depth camera + '
+                    'depth-to-laserscan helper (publishes /scan_depth as a '
+                    'second source for the local costmap obstacle_layer).',
+    )
 
     # -- Full robot bringup (driver + URDF + lidar + IMU filter + EKF) --
     robot_launch = IncludeLaunchDescription(
@@ -33,6 +45,7 @@ def generate_launch_description():
         ),
         launch_arguments={
             'use_lidar': 'true',
+            'use_depth': LaunchConfiguration('use_depth'),
         }.items(),
     )
 
@@ -61,6 +74,7 @@ def generate_launch_description():
     # only works on a FIXED map (navigation.launch.py with load_learned: true).
 
     return LaunchDescription([
+        use_depth_arg,
         robot_launch,
         nav2_launch,
     ])
