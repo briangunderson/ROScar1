@@ -36,6 +36,13 @@ def generate_launch_description():
                     'both depth pointcloud AND color stream remapped to '
                     '/image_raw). Disable only if the D435i is unplugged.',
     )
+    use_cliff_arg = DeclareLaunchArgument(
+        'use_cliff_detector', default_value='false',
+        description='Enable cliff/dropoff detector (forwarded to '
+                    'depth_camera.launch.py). OFF by default — adds CPU load '
+                    'and needs calibrated camera pitch. See '
+                    'docs/superpowers/specs/2026-04-30-d435i-obstacle-avoidance.md.',
+    )
 
     # -- URDF (robot_state_publisher + joint_state_publisher) --
     description_launch = IncludeLaunchDescription(
@@ -85,6 +92,9 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(
             os.path.join(bringup_dir, 'launch', 'depth_camera.launch.py')
         ),
+        launch_arguments={
+            'use_cliff_detector': LaunchConfiguration('use_cliff_detector'),
+        }.items(),
         condition=IfCondition(LaunchConfiguration('use_depth')),
     )
 
@@ -113,6 +123,7 @@ def generate_launch_description():
         use_lidar_arg,
         use_camera_arg,
         use_depth_arg,
+        use_cliff_arg,
         description_launch,
         driver_launch,
         lidar_node,

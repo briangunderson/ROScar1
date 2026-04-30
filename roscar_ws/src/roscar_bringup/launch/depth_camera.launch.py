@@ -27,12 +27,28 @@ and works reliably under launch_ros.
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
 def generate_launch_description():
     bringup_dir = get_package_share_directory('roscar_bringup')
     params_file = os.path.join(bringup_dir, 'config', 'realsense_params.yaml')
+
+    # Cliff detector is OPT-IN. It adds ~15-20 % CPU on the Pi5 and is
+    # sensitive to camera pitch calibration — without an accurate pitch
+    # in the URDF, false-positive cliff points appear all over the
+    # floor. Enable only when there's a real cliff to avoid (a stairway,
+    # a ledge) and the camera mounting has been calibrated.
+    use_cliff_arg = DeclareLaunchArgument(
+        'use_cliff_detector',
+        default_value='false',
+        description='Enable cliff/dropoff detector (depth → virtual obstacle '
+                    'PointCloud2 on /cliff_obstacles). OFF by default — adds '
+                    '~15-20%% CPU and needs calibrated camera pitch.',
+    )
 
     realsense_node = Node(
         package='realsense2_camera',
@@ -115,10 +131,12 @@ def generate_launch_description():
             'treat_invalid_as_cliff': False,
             'min_consecutive_cliff': 5,  # require 5 stacked cliff pixels
         }],
+        condition=IfCondition(LaunchConfiguration('use_cliff_detector')),
         output='screen',
     )
 
     return LaunchDescription([
+        use_cliff_arg,
         realsense_node,
         depth_to_scan_node,
         cliff_detector_node,
