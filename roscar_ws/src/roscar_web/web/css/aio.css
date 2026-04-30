@@ -362,6 +362,23 @@ input[type=range]::-moz-range-thumb {
 }
 .save-map-row .text-input-sm { flex: 1; }
 
+/* Nav tuning sliders — compact stat-group rows */
+.tune-row {
+  display: grid;
+  grid-template-columns: 1fr 80px 36px;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 0;
+  font-size: 0.78em;
+}
+.tune-row .tune-label { color: #b0b0b0; }
+.tune-row input[type=range] {
+  width: 100%;
+  accent-color: #00d4ff;
+  height: 16px;
+}
+.tune-row .mono { text-align: right; color: #00d4ff; }
+
 /* ═══════════════════════════════════════════════════════
    PANEL: DRIVE
    ═══════════════════════════════════════════════════════ */

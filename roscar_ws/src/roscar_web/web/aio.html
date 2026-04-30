@@ -173,6 +173,31 @@
           <div id="save-map-msg" class="status-msg"></div>
         </div>
 
+        <div class="stat-group">
+          <div class="stat-group-title">NAV TUNING <button id="nav-tune-reset" class="sm-btn" title="Reset all tuning sliders to defaults" style="float:right;font-size:0.75em;padding:2px 8px;">DEFAULTS</button></div>
+          <div class="tune-row">
+            <span class="tune-label">Max forward (m/s)</span>
+            <input type="range" id="tune-vx" min="0.2" max="1.0" step="0.05" value="0.8">
+            <span id="tune-vx-val" class="mono">0.80</span>
+          </div>
+          <div class="tune-row">
+            <span class="tune-label">Max strafe (m/s)</span>
+            <input type="range" id="tune-vy" min="0.0" max="0.5" step="0.05" value="0.20">
+            <span id="tune-vy-val" class="mono">0.20</span>
+          </div>
+          <div class="tune-row">
+            <span class="tune-label">Strafe samples</span>
+            <input type="range" id="tune-vy-samples" min="1" max="5" step="1" value="3">
+            <span id="tune-vy-samples-val" class="mono">3</span>
+          </div>
+          <div class="tune-row">
+            <span class="tune-label">Twirling penalty</span>
+            <input type="range" id="tune-twirl" min="0" max="40" step="1" value="10">
+            <span id="tune-twirl-val" class="mono">10</span>
+          </div>
+          <div id="nav-tune-msg" class="status-msg"></div>
+        </div>
+
       </div>
     </div>
 
