@@ -23,6 +23,7 @@ let saveMapSvc    = null;
 let listMapsSvc   = null;
 let currentMode   = 'idle';
 let navGoalCallback = null;
+let navModeCallback = null;
 // Last-saved map path, populated from /web/save_map's response. When the user
 // then picks "navigation" + that same map name from the dropdown, we reuse
 // this exact path instead of rebuilding it from MAPS_DIR + name.
@@ -36,6 +37,8 @@ export function onOdomData(cb)    { odomCbs.push(cb); }
 export function onBatteryData(cb) { battCbs.push(cb); }
 
 export function onNavModeChange(cb) { navGoalCallback = cb; }
+/** Like onNavModeChange but for nav-tuning sliders. Receives bool isNavMode. */
+export function onNavModeChange2(cb) { navModeCallback = cb; }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 const fmt = (v, d = 3) => (v >= 0 ? '+' : '') + v.toFixed(d);
@@ -209,6 +212,7 @@ function setupServices() {
       // sync with reality (e.g. after an INIT-pose pick that previously
       // clobbered it, or a missed mode-change event).
       if (navGoalCallback) navGoalCallback(isNavMode);
+      if (navModeCallback) navModeCallback(isNavMode);
     }, (err) => {
       console.warn('Could not fetch current mode:', err);
     });

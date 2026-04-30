@@ -6,7 +6,7 @@
 
 import { initTeleop }      from './aio-teleop.js';
 import { initCamera }      from './aio-camera.js';
-import { initStatus, onNavModeChange } from './aio-status.js';
+import { initStatus, onNavModeChange, onNavModeChange2 } from './aio-status.js';
 import { initLidar }       from './aio-lidar.js';
 import { initMap, enableNavGoalMode, clearMap }  from './aio-map.js';
 import { initGraphs }       from './aio-graphs.js';
@@ -15,7 +15,7 @@ import { initTF }           from './aio-tf.js';
 import { initSpaceMouse, requestSpaceMouse, isSpaceMouseConnected } from './aio-spacemouse.js';
 import { initLidarCam }     from './aio-lidar-cam.js';
 import { initCV }           from './aio-cv.js';
-import { initNavTuning }    from './aio-nav-tuning.js';
+import { initNavTuning, setNavTuningActive } from './aio-nav-tuning.js';
 
 // ── Connection config ────────────────────────────────────────────────────
 export const HOST  = window.location.hostname || 'localhost';
@@ -157,5 +157,6 @@ initSpaceMouse({
 });
 initLidarCam(getRos);
 initNavTuning(getRos);
+onNavModeChange2(setNavTuningActive);
 
 connect();
