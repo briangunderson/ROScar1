@@ -186,26 +186,35 @@ function setupServices() {
     ros, name: '/web/list_maps', serviceType: 'roscar_interfaces/ListMaps',
   });
 
-  // Fetch current mode from launch_manager so UI reflects reality after refresh
+  // Periodic sync of UI state with whatever launch_manager says is running.
+  // Fixes "I switched modes but the UI didn't follow" — e.g., a slam→nav
+  // transition where the request callback fires but the navGoalCallback
+  // hint never appears because of an event race or a stuck state.
   const getStatusSvc = new ROSLIB.Service({
     ros, name: '/web/get_status', serviceType: 'roscar_interfaces/GetStatus',
   });
-  getStatusSvc.callService(new ROSLIB.ServiceRequest({}), (resp) => {
-    if (resp.mode) {
-      currentMode = resp.mode;
-      setEl('mode-display', resp.mode.toUpperCase());
-      // Update mode button active state
-      document.querySelectorAll('#panel-status .mode-btn-sm[data-mode]').forEach(b => {
-        b.classList.toggle('active', b.dataset.mode === currentMode);
-      });
-      // Enable nav goal clicking if already in a nav mode
-      if ((currentMode === 'navigation' || currentMode === 'slam_nav') && navGoalCallback) {
-        navGoalCallback(true);
+  function syncModeFromServer() {
+    getStatusSvc.callService(new ROSLIB.ServiceRequest({}), (resp) => {
+      if (!resp.mode) return;
+      const isNavMode = resp.mode === 'navigation' || resp.mode === 'slam_nav';
+      if (resp.mode !== currentMode) {
+        currentMode = resp.mode;
+        setEl('mode-display', resp.mode.toUpperCase());
+        document.querySelectorAll('#panel-status .mode-btn-sm[data-mode]').forEach(b => {
+          b.classList.toggle('active', b.dataset.mode === currentMode);
+        });
       }
-    }
-  }, (err) => {
-    console.warn('Could not fetch current mode:', err);
-  });
+      // Always re-assert navGoalCallback's bool — cheap, idempotent, and
+      // catches the case where the dashboard's navGoalMode got out of
+      // sync with reality (e.g. after an INIT-pose pick that previously
+      // clobbered it, or a missed mode-change event).
+      if (navGoalCallback) navGoalCallback(isNavMode);
+    }, (err) => {
+      console.warn('Could not fetch current mode:', err);
+    });
+  }
+  syncModeFromServer();
+  setInterval(syncModeFromServer, 3000);
 }
 
 // ── Mode Buttons ────────────────────────────────────────────────────────────

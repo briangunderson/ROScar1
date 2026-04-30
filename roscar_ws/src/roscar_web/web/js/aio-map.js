@@ -67,7 +67,10 @@ export function initMap(getRosFn) {
   startRAFLoop();
 }
 
-export function enableNavGoalMode() { setNavGoalMode(true); }
+/** Public mode-sync hook called by aio-status whenever the active mode
+ * changes. Pass `true` for nav/slam_nav, `false` otherwise. (Default
+ * behaviour for the legacy zero-arg call sites is preserved.) */
+export function enableNavGoalMode(on = true) { setNavGoalMode(!!on); }
 
 /** Clear local map data so the canvas shows the "NO MAP DATA" placeholder. */
 export function clearMap() {
@@ -798,8 +801,9 @@ function sendNavGoal(canvasX, canvasY) {
   goalHandle.send();
 
   toast(`Nav goal: (${wx.toFixed(2)}, ${wy.toFixed(2)})`, 'ok');
-  // Exit goal-picking mode but keep the cancel button visible.
-  navGoalMode = false;
+  // Keep navGoalMode = true so the "TAP MAP TO SET GOAL" hint reappears
+  // automatically once the goal finishes (or is cancelled). Hint visibility
+  // gated on `goalHandle` presence anyway — see updateGoalUI.
   updateGoalUI();
 }
 
@@ -817,7 +821,10 @@ function setNavGoalMode(on) {
   navGoalMode = on;
   if (on && !goalActionClient) setupGoalClient();
   // Mutually exclusive with init-pose mode
-  if (on) initPoseMode = false;
+  // Don't clobber initPoseMode here either — they're independent overlays.
+  // (Was: `if (on) initPoseMode = false`. That made starting a nav-mode
+  // launch silently kill an in-flight INIT-pose pick, leading to confused
+  // UI on slam→nav transitions.)
   updateGoalUI();
 }
 
@@ -888,10 +895,15 @@ function publishInitialPose(wx, wy, yaw) {
   }));
 }
 
+/** Toggle the init-pose pick. NOTE: does NOT clobber navGoalMode — that's
+ * the persistent "we're in a nav-capable mode" flag and should survive
+ * picking an initial pose. The mousedown/touchstart handlers check
+ * initPoseMode first, so it acts as a transient overlay over navGoalMode. */
 function setInitPoseMode(on) {
   initPoseMode = on;
   if (on && !initialPoseTopic) setupInitialPoseTopic();
-  if (on) navGoalMode = false;  // mutually exclusive
+  // Do NOT touch navGoalMode here — see comment above. initPoseMode is the
+  // transient overlay; navGoalMode is the persistent state.
   updateGoalUI();
 }
 
