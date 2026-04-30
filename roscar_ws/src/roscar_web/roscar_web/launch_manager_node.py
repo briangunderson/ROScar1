@@ -307,6 +307,13 @@ class LaunchManagerNode(Node):
                 # Without this snapshot, markers learned during slam_nav
                 # would either be lost on relaunch or contaminate other
                 # maps via the shared global file.
+                #
+                # Three cases:
+                #   1. Live markers exist  → copy to sidecar (typical slam_nav)
+                #   2. No live markers AND a stale sidecar exists for this map
+                #      → clear it (prevents nav from loading old data)
+                #   3. No live markers AND no existing sidecar (pure slam mode,
+                #      first save) → do nothing, no log noise
                 live_markers = os.path.expanduser('~/roscar_ws/learned_markers.yaml')
                 sidecar = map_path + '.markers.yaml'
                 try:
@@ -314,13 +321,14 @@ class LaunchManagerNode(Node):
                         import shutil
                         shutil.copy2(live_markers, sidecar)
                         self.get_logger().info(f'Markers snapshot saved: {sidecar}')
-                    else:
-                        # No markers learned this session — write an empty
-                        # sidecar so nav can't accidentally load a leftover
-                        # from an older session under the same map name.
+                    elif os.path.exists(sidecar):
+                        # Stale sidecar from a previous slam_nav session under
+                        # the same map name. Clear it so nav doesn't load
+                        # markers that were learned in a different map frame.
                         with open(sidecar, 'w') as f:
                             f.write('{}\n')
-                        self.get_logger().info(f'No live markers; wrote empty sidecar {sidecar}')
+                        self.get_logger().info(f'Cleared stale markers sidecar: {sidecar}')
+                    # else: no live markers, no existing sidecar — silent no-op.
                 except Exception as e:
                     self.get_logger().warn(f'Failed to snapshot markers sidecar: {e}')
             else:
