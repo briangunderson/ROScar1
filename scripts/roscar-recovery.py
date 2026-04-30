@@ -13,6 +13,7 @@ from datetime import datetime
 
 PORT = 9999
 SERVICE = "roscar-web"
+REPO_DIR = "/home/brian/ROScar1"
 
 
 def get_service_status():
@@ -46,6 +47,63 @@ def get_service_status():
                 info["uptime"] = ts if ts else "N/A"
     except Exception:
         pass
+    return info
+
+
+def _run(cmd, timeout=30):
+    """Run a shell command, return (returncode, stdout, stderr)."""
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return result.returncode, result.stdout.strip(), result.stderr.strip()
+    except subprocess.TimeoutExpired:
+        return 124, "", f"timed out after {timeout}s"
+    except Exception as e:
+        return 1, "", str(e)
+
+
+def git_short(rev):
+    """Return short hash for a rev, or '?' if lookup fails."""
+    rc, out, _ = _run(["git", "-C", REPO_DIR, "rev-parse", "--short", rev], timeout=5)
+    return out if rc == 0 and out else "?"
+
+
+def git_pull():
+    """git fetch + ff-only pull. Returns dict with before/after commit info.
+
+    Runs as the same user the recovery service runs as (brian), so no sudo.
+    Refuses non-fast-forward pulls — if origin diverges from local, the
+    operator has to ssh in and reconcile manually rather than risk a merge
+    conflict from a web button.
+    """
+    info = {
+        "success": False,
+        "before": git_short("HEAD"),
+        "after": "?",
+        "branch": "?",
+        "message": "",
+    }
+    rc, branch, _ = _run(["git", "-C", REPO_DIR, "rev-parse", "--abbrev-ref", "HEAD"], timeout=5)
+    if rc == 0:
+        info["branch"] = branch
+
+    rc, _, err = _run(["git", "-C", REPO_DIR, "fetch", "--prune"], timeout=30)
+    if rc != 0:
+        info["message"] = f"fetch failed: {err or 'unknown error'}"
+        return info
+
+    rc, out, err = _run(
+        ["git", "-C", REPO_DIR, "pull", "--ff-only"], timeout=30,
+    )
+    info["after"] = git_short("HEAD")
+    info["success"] = (rc == 0)
+    if rc == 0:
+        if "Already up to date" in out or info["before"] == info["after"]:
+            info["message"] = f"Already up to date ({info['after']})"
+        else:
+            info["message"] = f"{info['before']} → {info['after']}"
+    else:
+        # Most common cause is a non-FF push from elsewhere or a dirty tree.
+        info["message"] = (err or out or "pull failed").splitlines()[0][:200]
     return info
 
 
@@ -97,6 +155,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
   .btn-restart { background: #e2b714; color: #1a1a2e; }
   .btn-start { background: #2d8a4e; color: #fff; }
   .btn-stop { background: #8a2d2d; color: #fff; }
+  .btn-update { background: #4769b8; color: #fff; margin-top: 0.5rem; width: 100%; }
+  .commit { font-family: ui-monospace, Menlo, monospace; font-size: 0.8rem; color: #aaa; }
   .dashboard-link { display: block; text-align: center; margin-top: 1.2rem;
                     color: #5dade2; text-decoration: none; font-size: 0.9rem; }
   .dashboard-link:hover { text-decoration: underline; }
@@ -135,6 +195,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
     <button class="btn-restart" onclick="act('restart')">Restart</button>
     <button class="btn-stop" onclick="act('stop')">Stop</button>
   </div>
+  <button class="btn-update" onclick="updateRepo()">Pull from GitHub + Restart</button>
   <a class="dashboard-link" id="dashlink" href="/aio.html">Open AIO Dashboard &rarr;</a>
 </div>
 <div class="toast" id="toast"></div>
@@ -185,6 +246,24 @@ async function act(action) {
   }
 }
 
+async function updateRepo() {
+  if (!confirm('Pull latest from GitHub and restart roscar-web?\n\n' +
+               'This is a fast-forward-only pull — refuses if local has diverged.')) return;
+  document.querySelectorAll('button').forEach(b => b.disabled = true);
+  spinner.style.display = 'block';
+  try {
+    const r = await fetch('/update', { method: 'POST' });
+    const d = await r.json();
+    const msg = (d.branch && d.branch !== '?' ? `[${d.branch}] ` : '') + (d.message || '');
+    showToast(msg, d.success);
+    setTimeout(refresh, 3000);
+  } catch (e) { showToast('Update failed: ' + e.message, false); }
+  finally {
+    spinner.style.display = 'none';
+    document.querySelectorAll('button').forEach(b => b.disabled = false);
+  }
+}
+
 refresh();
 setInterval(refresh, 5000);
 </script>
@@ -214,6 +293,22 @@ class RecoveryHandler(http.server.BaseHTTPRequestHandler):
         if path in ("/start", "/stop", "/restart"):
             action = path.lstrip("/")
             result = service_action(action)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+        elif path == "/update":
+            # git pull + (on success) restart roscar-web
+            result = git_pull()
+            if result["success"] and result["before"] != result["after"]:
+                # Real update — restart the service so the new code is live.
+                rs = service_action("restart")
+                result["restart"] = rs
+                if rs.get("success"):
+                    result["message"] += " (restarted)"
+                else:
+                    result["message"] += f" — restart failed: {rs.get('message','?')}"
+                    result["success"] = False
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
