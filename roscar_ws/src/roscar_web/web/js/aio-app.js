@@ -15,6 +15,7 @@ import { initTF }           from './aio-tf.js';
 import { initSpaceMouse, requestSpaceMouse, isSpaceMouseConnected } from './aio-spacemouse.js';
 import { initLidarCam }     from './aio-lidar-cam.js';
 import { initCV }           from './aio-cv.js';
+import { initNavTuning }    from './aio-nav-tuning.js';
 
 // ── Connection config ────────────────────────────────────────────────────
 export const HOST  = window.location.hostname || 'localhost';
@@ -155,5 +156,6 @@ initSpaceMouse({
   },
 });
 initLidarCam(getRos);
+initNavTuning(getRos);
 
 connect();

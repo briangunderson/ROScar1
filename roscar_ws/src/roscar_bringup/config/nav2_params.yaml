@@ -114,8 +114,14 @@ controller_server:
       # -- Velocity limits (mecanum holonomic) --
       min_vel_x: -0.4
       max_vel_x: 0.8
-      min_vel_y: -0.5               # Mecanum strafing!
-      max_vel_y: 0.5                # Mecanum strafing!
+      # Strafe is mechanically ~2x less efficient than forward driving on
+      # mecanum (all four wheels work, only the lateral roller component
+      # contributes to motion, rollers slip more than wheel tread, battery
+      # cost roughly doubles). Cap the controller's strafe budget at ~25%
+      # of forward speed so it strafes only when DWB really needs to
+      # (tight spaces / fine alignment), not as a default solution.
+      min_vel_y: -0.2
+      max_vel_y: 0.2
       max_vel_theta: 3.0
       min_speed_xy: 0.0
       max_speed_xy: 0.8
