@@ -102,13 +102,18 @@ def generate_launch_description():
             'output_frame': 'base_link',
             'camera_link_frame': 'camera_link',
             'floor_tolerance_m': 0.05,
-            'min_cliff_drop_m': 0.10,
-            'max_detect_distance_m': 1.5,
-            'min_valid_depth_m': 0.30,
-            'col_stride': 4,
-            'row_stride': 4,
-            'treat_invalid_as_cliff': True,
-            'min_consecutive_cliff': 3,
+            'min_cliff_drop_m': 0.15,    # require ≥15cm drop before firing
+            'max_detect_distance_m': 1.2, # 1.2m forward — closer = more reliable
+            'min_valid_depth_m': 0.40,
+            'col_stride': 8,             # wider stride → fewer points → less spam
+            'row_stride': 8,
+            # Invalid depth (NaN/0) is a noisy cliff signal — far walls
+            # beyond 3 m, dark surfaces, glass, and matte black all read
+            # as invalid. Default off; flip on only for environments
+            # with real cliffs that need to be conservatively avoided
+            # (e.g., a real stairway).
+            'treat_invalid_as_cliff': False,
+            'min_consecutive_cliff': 5,  # require 5 stacked cliff pixels
         }],
         output='screen',
     )

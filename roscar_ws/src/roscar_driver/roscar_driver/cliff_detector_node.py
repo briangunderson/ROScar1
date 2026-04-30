@@ -98,7 +98,13 @@ class CliffDetector(Node):
         self.declare_parameter('camera_link_frame', 'camera_link')
         self.declare_parameter('col_stride', 4)
         self.declare_parameter('row_stride', 4)
-        self.declare_parameter('treat_invalid_as_cliff', True)
+        # Invalid depth (NaN / 0) is a noisy cliff signal. Far walls
+        # beyond range_max, glossy floors, dark matte surfaces, and
+        # glass all read as invalid. Default off: rely on the
+        # "actual > expected" predicate which is robust. Flip on only
+        # for environments where a real cliff needs to be conservatively
+        # avoided AND the floor is reliably visible to depth.
+        self.declare_parameter('treat_invalid_as_cliff', False)
         self.declare_parameter('min_consecutive_cliff', 3)
         self.declare_parameter('depth_topic', '/camera/camera/depth/image_rect_raw')
         self.declare_parameter('camera_info_topic', '/camera/camera/depth/camera_info')
