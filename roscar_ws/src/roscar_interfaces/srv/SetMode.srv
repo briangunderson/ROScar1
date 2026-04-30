@@ -1,5 +1,10 @@
 string mode
 string map_path
+# Optional launch args passed through to the selected launch file.
+# All modes (teleop, slam, navigation, slam_nav) accept use_depth — when true
+# the D435i depth camera is launched alongside the robot stack.
+# Default is false (new field — clients that omit it get use_depth=false).
+bool use_depth
 ---
 bool success
 string message
