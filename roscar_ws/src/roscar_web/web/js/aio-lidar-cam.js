@@ -23,7 +23,10 @@ let scanSub   = null;
 let canvas    = null;
 let ctx       = null;
 let lastScan  = null;
-let enabled   = true;
+// Off by default — the overlay is a fun "sci-fi HUD" but visually noisy and
+// distracting for routine driving. User can toggle it via the DEPTH button
+// in the camera panel.
+let enabled   = false;
 let rafId     = null;
 
 // Smoothed nearest-object state (prevents jitter)
@@ -71,10 +74,11 @@ export function initLidarCam(getRosFn) {
     if (ev === 'connected') subscribeScan();
   });
 
-  // Toggle button
+  // Toggle button — initial highlight reflects current `enabled` state
+  // (off by default; user clicks DEPTH to opt in).
   const btn = document.getElementById('lidar-cam-toggle');
   if (btn) {
-    btn.classList.add('active');
+    btn.classList.toggle('active', enabled);
     btn.addEventListener('click', () => {
       enabled = !enabled;
       btn.classList.toggle('active', enabled);
