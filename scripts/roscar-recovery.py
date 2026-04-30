@@ -8,6 +8,7 @@ import http.server
 import json
 import subprocess
 import socket
+import time
 from urllib.parse import urlparse
 from datetime import datetime
 
@@ -107,6 +108,51 @@ def git_pull():
     return info
 
 
+def colcon_build():
+    """Run a targeted colcon build for the roscar_* packages.
+
+    Returns dict {success, message, duration}. The build runs as the same
+    user the recovery service runs as (brian). We source ROS via a login
+    shell so colcon can find its tools and the workspace's underlay.
+
+    Targeted to roscar_* only — full-workspace builds drag in sllidar_ros2,
+    realsense, etc. which haven't changed and add 30+ seconds for nothing.
+    """
+    info = {"success": False, "message": "", "duration": 0.0}
+    workspace = "/home/brian/roscar_ws"
+    cmd = (
+        "set -e; "
+        "source /opt/ros/jazzy/setup.bash; "
+        f"cd {workspace}; "
+        "colcon build --symlink-install "
+        "--packages-select roscar_web roscar_driver roscar_bringup "
+        "roscar_description roscar_interfaces 2>&1 | tail -20"
+    )
+    t0 = time.time()
+    try:
+        result = subprocess.run(
+            ["bash", "-lc", cmd],
+            capture_output=True, text=True, timeout=180,
+        )
+        info["duration"] = round(time.time() - t0, 1)
+        if result.returncode == 0:
+            # Pull the most informative line out for the toast — usually the
+            # "X packages finished" summary line.
+            tail = result.stdout.strip().splitlines()[-1:] or [""]
+            info["success"] = True
+            info["message"] = f"Built in {info['duration']}s — {tail[-1].strip()}"
+        else:
+            # Truncate the error output so the toast stays readable.
+            err_tail = (result.stdout.strip().splitlines() or [""])[-3:]
+            info["message"] = "; ".join(err_tail)[:240]
+    except subprocess.TimeoutExpired:
+        info["duration"] = round(time.time() - t0, 1)
+        info["message"] = "build timed out (180s)"
+    except Exception as e:
+        info["message"] = str(e)
+    return info
+
+
 def service_action(action):
     """Run systemctl start/stop/restart."""
     try:
@@ -156,6 +202,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
   .btn-start { background: #2d8a4e; color: #fff; }
   .btn-stop { background: #8a2d2d; color: #fff; }
   .btn-update { background: #4769b8; color: #fff; margin-top: 0.5rem; width: 100%; }
+  .btn-build  { background: #6d4096; color: #fff; margin-top: 0.5rem; width: 100%; }
   .commit { font-family: ui-monospace, Menlo, monospace; font-size: 0.8rem; color: #aaa; }
   .dashboard-link { display: block; text-align: center; margin-top: 1.2rem;
                     color: #5dade2; text-decoration: none; font-size: 0.9rem; }
@@ -196,6 +243,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
     <button class="btn-stop" onclick="act('stop')">Stop</button>
   </div>
   <button class="btn-update" onclick="updateRepo()">Pull from GitHub + Restart</button>
+  <button class="btn-build" onclick="rebuildRepo()">Rebuild + Restart</button>
   <a class="dashboard-link" id="dashlink" href="/aio.html">Open AIO Dashboard &rarr;</a>
 </div>
 <div class="toast" id="toast"></div>
@@ -240,6 +288,25 @@ async function act(action) {
     // Wait a moment then refresh status
     setTimeout(refresh, 2000);
   } catch (e) { showToast('Request failed: ' + e.message, false); }
+  finally {
+    spinner.style.display = 'none';
+    document.querySelectorAll('button').forEach(b => b.disabled = false);
+  }
+}
+
+async function rebuildRepo() {
+  if (!confirm('Rebuild roscar_* packages and restart roscar-web?\n\n' +
+               'Needed after adding new web files (setup.py walks web/ at build ' +
+               'time — only files present at the last build get symlinked into ' +
+               'install/share). Takes ~5-30 seconds.')) return;
+  document.querySelectorAll('button').forEach(b => b.disabled = true);
+  spinner.style.display = 'block';
+  try {
+    const r = await fetch('/rebuild', { method: 'POST' });
+    const d = await r.json();
+    showToast(d.message || (d.success ? 'rebuilt' : 'rebuild failed'), d.success);
+    setTimeout(refresh, 3000);
+  } catch (e) { showToast('Rebuild failed: ' + e.message, false); }
   finally {
     spinner.style.display = 'none';
     document.querySelectorAll('button').forEach(b => b.disabled = false);
@@ -302,6 +369,24 @@ class RecoveryHandler(http.server.BaseHTTPRequestHandler):
             result = git_pull()
             if result["success"] and result["before"] != result["after"]:
                 # Real update — restart the service so the new code is live.
+                rs = service_action("restart")
+                result["restart"] = rs
+                if rs.get("success"):
+                    result["message"] += " (restarted)"
+                else:
+                    result["message"] += f" — restart failed: {rs.get('message','?')}"
+                    result["success"] = False
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+        elif path == "/rebuild":
+            # colcon build + (on success) restart roscar-web. Needed when new
+            # files are added under roscar_web/web/ — setup.py walks the
+            # directory at build time, so symlinks for new files only appear
+            # in install/share after a build.
+            result = colcon_build()
+            if result["success"]:
                 rs = service_action("restart")
                 result["restart"] = rs
                 if rs.get("success"):
