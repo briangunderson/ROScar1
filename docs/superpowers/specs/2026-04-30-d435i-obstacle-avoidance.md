@@ -52,47 +52,63 @@ The D435i can deliver in many ways, but each option has a different CPU cost and
 ### 4.1 Topology
 
 ```
-realsense2_camera ─── /camera/camera/depth/color/points ───┐
-(already running)                                          │
-                                                           v
-                          pointcloud_to_laserscan ─── /scan_depth (sensor_msgs/LaserScan)
-                          (new node, NEW launch in        │
-                           depth_camera.launch.py)        │
-                                                          v
-                                          local_costmap.obstacle_layer
-                                                  ├─ scan        (lidar, existing)
-                                                  └─ scan_depth  (new)
+realsense2_camera ─── /camera/camera/depth/image_rect_raw ───┐
+                       /camera/camera/depth/camera_info ────┐│
+(already running)                                           ││
+                                                            vv
+                          depthimage_to_laserscan ─── /scan_depth (sensor_msgs/LaserScan)
+                          (new node, NEW in                 │
+                           depth_camera.launch.py)          │
+                                                            v
+                                            local_costmap.obstacle_layer
+                                                    ├─ scan        (lidar, existing)
+                                                    └─ scan_depth  (new)
 ```
 
-### 4.2 New node: `pointcloud_to_laserscan_node`
+### 4.2 New node: `depthimage_to_laserscan_node`
 
 Added inside `depth_camera.launch.py` so it lifecycles with the depth camera.
 
 ```python
 Node(
-    package='pointcloud_to_laserscan',
-    executable='pointcloud_to_laserscan_node',
+    package='depthimage_to_laserscan',
+    executable='depthimage_to_laserscan_node',
     name='depth_to_scan',
     parameters=[{
-        'target_frame': 'base_link',
-        'transform_tolerance': 0.1,
-        'min_height': 0.05,        # 5 cm above floor — skip floor noise
-        'max_height': 0.50,        # up to top of robot body (below mast/lidar)
-        'angle_min': -0.76,        # -43.5 deg, matches D435i depth FOV
-        'angle_max':  0.76,        # +43.5 deg
-        'angle_increment': 0.0087, # ~0.5 deg, ~175 rays
-        'scan_time': 0.0667,       # 1/15 Hz
-        'range_min': 0.20,         # D435i min usable depth
+        'output_frame': 'base_link',
+        'scan_height': 120,        # Number of vertical rows around image center to collapse
+        'range_min': 0.2,          # D435i min usable depth
         'range_max': 3.0,          # D435i useful depth range
-        'use_inf': False,          # Mark invalid as range_max + 1 (out-of-range)
-        'inf_epsilon': 1.0,
+        'scan_time': 0.0667,       # 1/15 Hz frame period
     }],
     remappings=[
-        ('cloud_in', '/camera/camera/depth/color/points'),
+        ('depth', '/camera/camera/depth/image_rect_raw'),
+        ('depth_camera_info', '/camera/camera/depth/camera_info'),
         ('scan', '/scan_depth'),
     ],
 )
 ```
+
+**Why depthimage_to_laserscan and not pointcloud_to_laserscan**
+
+Originally tried pointcloud_to_laserscan — bench-tested fine standalone (`ros2 run`),
+but when launched via `launch_ros.actions.Node` alongside the realsense camera in
+`depth_camera.launch.py`, the node silently fails to publish. Verified on hardware
+2026-04-30: same binary, same params, same input topic, same TF chain — works in
+`ros2 run`, dead in `ros2 launch`. The internal `message_filters::TfFilter` appears
+to lose every cloud frame under the launch_ros context with no logged error.
+A 10 s `TimerAction` startup delay didn't fix it.
+
+`depthimage_to_laserscan` takes the depth image + camera_info directly. No
+`message_filters` chain, no pointcloud intermediate. Verified working both
+standalone and under launch_ros. Bonus: it's even cheaper (skips the
+realsense pointcloud generation step entirely from the laser-scan path).
+
+The 120-row `scan_height` collapses a 14.5° vertical slice of the depth image
+into a 2D scan. With the camera at z ≈ 0.163 m above base_link and looking
+horizontally, that slice covers z ≈ [0.04, 0.29] m at 1 m forward and
+[-0.10, 0.43] m at 2 m forward — the exact gap below the lidar's 0.295 m
+scan plane.
 
 ### 4.3 Costmap config change
 

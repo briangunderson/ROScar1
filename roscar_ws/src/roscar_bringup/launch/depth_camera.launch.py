@@ -8,18 +8,25 @@ and /camera_info topics, so existing consumers (dashboard MJPEG stream, ArUco
 detector, YOLO) keep working with zero code changes. The D435i replaces the
 Logitech webcam — there's one camera now, not two.
 
-Depth → virtual laser scan: a pointcloud_to_laserscan node collapses the
-depth point cloud into a 2D scan (`/scan_depth`) that Nav2's local costmap
+Depth → virtual laser scan: a depthimage_to_laserscan node back-projects
+the raw depth image to a 2D scan (`/scan_depth`) that Nav2's local costmap
 obstacle_layer can consume alongside the real lidar. This catches obstacles
 the lidar misses — table edges, chair seats, low boxes — at near-zero CPU
 cost compared to a full voxel layer. See
 docs/superpowers/specs/2026-04-30-d435i-obstacle-avoidance.md.
+
+Why depthimage_to_laserscan and not pointcloud_to_laserscan: verified on
+hardware 2026-04-30 that pointcloud_to_laserscan_node, when launched via
+launch_ros.actions.Node alongside the realsense camera, silently fails to
+publish — its message_filters::TfFilter loses every frame. The same binary
+works when run via `ros2 run` against the same topics. depthimage_to_laserscan
+takes the depth image directly + camera_info (no message_filters TF chain)
+and works reliably under launch_ros.
 """
 
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import TimerAction
 from launch_ros.actions import Node
 
 
@@ -45,43 +52,36 @@ def generate_launch_description():
         emulate_tty=True,
     )
 
-    # Depth point cloud → virtual 2D laser scan in base_link frame.
-    # Height filter skips the floor (< 5 cm) and stuff above the robot body
-    # (> 50 cm — the lidar already sees that range, and 50 cm is below the
-    # mast/lidar mount). The result is a horizontal slice of the depth volume
-    # that fills the gap between the floor and the lidar's scan plane —
-    # exactly where tables, chair seats, low boxes, and short obstacles
-    # live. Range is capped at 3 m (D435i's useful depth limit on this unit).
+    # depthimage_to_laserscan back-projects a horizontal slice of the depth
+    # image into a 2D LaserScan in base_link.
     #
-    # STARTUP RACE: this node uses message_filters::TfFilter internally,
-    # which silently drops cloud frames if the camera→base_link static TF
-    # isn't already in its TF buffer when the first cloud arrives. Verified
-    # on hardware 2026-04-30: starting it concurrently with the realsense
-    # camera + URDF state publisher leaves it permanently silent — no errors
-    # logged, just no LaserScan output. Starting it ~10 s after the rest of
-    # the stack works reliably (the camera takes ~5 s to come online with
-    # initial_reset, and TFs need to propagate). The TimerAction wrapper
-    # below enforces that delay.
+    # scan_height = 120 — number of horizontal pixel rows centered on the
+    # depth image's vertical center to collapse into the scan. The 640×480
+    # depth image has a 58° vertical FOV, so 120 rows ≈ 14.5° vertical
+    # slice. With the camera at base_link z = 0.163 m looking horizontal,
+    # that 14.5° slice spans z ≈ [0.04 m, 0.29 m] above the floor at 1 m
+    # forward, expanding to [-0.10 m, 0.43 m] at 2 m. That fills the gap
+    # below the lidar plane (which is at z ≈ 0.295 m above floor).
+    #
+    # range_min/max match the D435i's useful depth window: < 0.2 m is
+    # below sensor minimum, > 3 m is too noisy.
+    #
+    # output_frame: the published scan's header.frame_id. base_link puts
+    # it in the same frame the costmap obstacle_layer expects.
     depth_to_scan_node = Node(
-        package='pointcloud_to_laserscan',
-        executable='pointcloud_to_laserscan_node',
+        package='depthimage_to_laserscan',
+        executable='depthimage_to_laserscan_node',
         name='depth_to_scan',
         parameters=[{
-            'target_frame': 'base_link',
-            'transform_tolerance': 0.5,  # generous: cloud stamps occasionally lag TFs by ~100 ms
-            'min_height': 0.05,         # 5 cm above floor — skip floor noise
-            'max_height': 0.50,         # up to top of robot body (below mast)
-            'angle_min': -0.76,         # -43.5°, matches D435i depth FOV
-            'angle_max':  0.76,         # +43.5°
-            'angle_increment': 0.0087,  # ~0.5° per ray, ~175 rays
-            'scan_time': 0.0667,        # 1/15 Hz = depth frame period
-            'range_min': 0.20,          # D435i min usable depth
-            'range_max': 3.0,           # D435i useful depth range
-            'use_inf': False,           # invalid pixels become out-of-range
-            'inf_epsilon': 1.0,
+            'output_frame': 'base_link',
+            'scan_height': 120,
+            'range_min': 0.2,
+            'range_max': 3.0,
+            'scan_time': 0.0667,
         }],
         remappings=[
-            ('cloud_in', '/camera/camera/depth/color/points'),
+            ('depth', '/camera/camera/depth/image_rect_raw'),
+            ('depth_camera_info', '/camera/camera/depth/camera_info'),
             ('scan', '/scan_depth'),
         ],
         output='screen',
@@ -89,5 +89,5 @@ def generate_launch_description():
 
     return LaunchDescription([
         realsense_node,
-        TimerAction(period=10.0, actions=[depth_to_scan_node]),
+        depth_to_scan_node,
     ])
