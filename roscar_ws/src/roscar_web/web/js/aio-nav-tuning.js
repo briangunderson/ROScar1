@@ -16,6 +16,10 @@ import { onAppEvent, toast } from './aio-app.js';
 
 let getRos;
 let setParamsSvc = null;
+// Tracked from aio-status's mode poll. We only push to /controller_server
+// when nav is actually running — otherwise the service doesn't exist yet
+// and rosbridge logs InvalidServiceException noise on every push attempt.
+let navActive = false;
 
 // Slider definitions: param name → { domId, default, type, format }
 // type 2 = integer, type 3 = double (rcl_interfaces/msg/ParameterType)
@@ -51,16 +55,30 @@ export function initNavTuning(getRosFn) {
   if (resetBtn) resetBtn.addEventListener('click', resetDefaults);
 
   onAppEvent((ev) => {
-    if (ev === 'connected') {
-      ensureService();
-      // Re-push every current slider value so a fresh nav launch picks up
-      // the user's preferences without any manual interaction.
+    if (ev === 'connected') ensureService();
+  });
+}
+
+/** Called by aio-status when the active mode is/becomes nav-capable.
+ * On nav-mode entry we push every saved slider value once so a fresh nav
+ * launch picks up the user's tuning automatically. Outside nav mode we
+ * skip pushes — controller_server doesn't exist yet and rosbridge would
+ * log InvalidServiceException noise on every attempt. */
+export function setNavTuningActive(on) {
+  const wasActive = navActive;
+  navActive = !!on;
+  if (navActive && !wasActive) {
+    // Mode just flipped to nav. Re-apply the user's saved tuning.
+    // Small delay so the controller_server lifecycle activate completes
+    // before we hit it with set_parameters calls.
+    setTimeout(() => {
+      if (!navActive) return;  // bailed back to non-nav mode in the gap
       for (const p of PARAMS) {
         const s = document.getElementById(p.dom);
         if (s) pushParam(p, s.value);
       }
-    }
-  });
+    }, 4000);
+  }
 }
 
 function ensureService() {
@@ -83,10 +101,16 @@ function paramValue(type, raw) {
 }
 
 function pushParam(p, raw) {
+  // Always persist the slider's current value, regardless of whether we
+  // can reach controller_server right now.
+  saveToStorage();
+  if (!navActive) {
+    setMsg(`${p.param} = ${p.fmt(parseFloat(raw))} (saved — applies on next nav launch)`, 'warn');
+    return;
+  }
   ensureService();
   if (!setParamsSvc) {
     setMsg(`(rosbridge not connected — saved locally)`, 'warn');
-    saveToStorage();
     return;
   }
   const params = [{ name: p.param, value: paramValue(p.type, raw) }];
