@@ -148,17 +148,31 @@ When `use_depth:=false`, the depth camera launch is skipped, which means `/scan_
 
 While auditing the depth pipeline I noticed `slam_nav.launch.py` hard-codes `use_lidar: 'true'` but never forwards `use_depth` to `robot.launch.py`. Today this is fine because `robot.launch.py` defaults to `use_depth: 'true'`, but it's inconsistent with `slam.launch.py` and `navigation.launch.py` which both do forward it. This PR fixes that for consistency.
 
-## 5. Phase A.2 — Cliff detection (next PR)
+## 5. Phase A.2 — Cliff detection (PR #29, opt-in / draft)
 
-A small ROS node `cliff_detector_node`:
+Implemented as `roscar_driver.cliff_detector_node`. ~250 lines of Python,
+vectorized numpy. Subscribes to depth image + camera_info, auto-derives
+camera height from TF, emits virtual obstacle PointCloud2 at expected-floor
+locations wherever the depth image fails the floor-plane test.
 
-- Subscribe to `/camera/camera/depth/image_rect_raw`
-- Project a fan of rays at the floor plane in the camera frame (using camera intrinsics + camera_link → base_footprint TF)
-- For each ray, check if there's a return from the depth image close to the expected ground-plane distance
-- If a ray comes back significantly *farther* than expected (or is invalid), that's a cliff
-- Publish a virtual obstacle (custom topic, e.g. `/cliff_obstacles` as a `PointCloud2`) — feed it into the obstacle_layer as a third source
+Wired into `local_costmap.obstacle_layer` as a 3rd source (`/cliff_obstacles`,
+`marking: true, clearing: false` so cliffs are sticky).
 
-Expected size: ~150 lines of Python. Can be tested by pointing the camera at a step or table edge.
+**Status: opt-in / draft.** Verified working end-to-end (cliff cloud
+publishes at depth rate, costmap absorbs the points), but with caveats
+that need addressing before promoting to default-on:
+
+| Issue | Workaround | Real fix |
+|---|---|---|
+| Sensitive to camera-pitch error in URDF | `min_cliff_drop_m` ≥ 0.15 m, `min_consecutive_cliff` ≥ 5 | calibrate D435i pitch, bake into URDF |
+| ~18 % CPU on Pi5 (load avg 4 → 9-13 with full nav stack) | gate behind `use_cliff_detector:=true`, default off | rewrite hot loop in C++ or cv2-vectorized |
+| Untested with a real cliff | use cardboard-edge mockup or ledge | actual stairway test |
+
+For now the node is gated behind `use_cliff_detector` (default false).
+Enable via `ros2 launch roscar_bringup slam_nav.launch.py use_cliff_detector:=true`.
+The /cliff_obstacles costmap source remains listed permanently — when the
+detector isn't running, obstacle_layer tolerates the missing source the
+same way it tolerates `/scan_depth` when `use_depth=false`.
 
 ## 6. Phase B — Voxel layer (later, if A.1 doesn't cover enough)
 
