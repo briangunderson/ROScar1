@@ -17,9 +17,12 @@ import math
 import rclpy
 from rclpy.node import Node
 from rclpy.duration import Duration
+from rclpy.action import ActionClient
 
-from geometry_msgs.msg import PoseWithCovarianceStamped
+from geometry_msgs.msg import PoseWithCovarianceStamped, PoseStamped
+from std_msgs.msg import Empty, Int8
 from tf2_ros import Buffer, TransformListener
+from nav2_msgs.action import NavigateToPose
 
 import glob as globmod
 
@@ -68,6 +71,24 @@ class LaunchManagerNode(Node):
             GetStatus, '/web/get_status', self._get_status_callback)
         self._list_maps_srv = self.create_service(
             ListMaps, '/web/list_maps', self._list_maps_callback)
+
+        # Nav-goal shim. Bundled roslibjs (1.x) only knows ROS1-style
+        # topic-based actionlib. ROS2 actions are service-based and the
+        # dashboard can't reach them directly. Workaround: dashboard
+        # publishes a PoseStamped to /web/nav_goal, this node forwards it
+        # to /navigate_to_pose. /web/cancel_nav_goal cancels the active goal.
+        self._nav_action = ActionClient(self, NavigateToPose, '/navigate_to_pose')
+        self._nav_goal_handle = None
+        self._nav_goal_lock = threading.Lock()
+        self.create_subscription(
+            PoseStamped, '/web/nav_goal', self._on_nav_goal, 10)
+        self.create_subscription(
+            Empty, '/web/cancel_nav_goal', self._on_cancel_nav_goal, 10)
+        # Result feedback to the dashboard. Int8 with the action_msgs/GoalStatus
+        # value (4=succeeded, 5=cancelled, 6=aborted, plus any negative codes
+        # for our own errors).
+        self._nav_result_pub = self.create_publisher(
+            Int8, '/web/nav_goal_result', 10)
 
         self.get_logger().info('Launch manager ready. Mode: idle')
 
@@ -378,6 +399,74 @@ class LaunchManagerNode(Node):
                 pass  # Process already gone
             finally:
                 self._process = None
+
+    # ------------------------------------------------------------------ #
+    #  Nav-goal shim                                                       #
+    # ------------------------------------------------------------------ #
+
+    def _on_nav_goal(self, msg: PoseStamped):
+        """Forward a PoseStamped published on /web/nav_goal to Nav2."""
+        if not self._nav_action.server_is_ready():
+            self.get_logger().warn(
+                '/navigate_to_pose action server not ready (is nav mode active?)')
+            return
+        if not msg.header.frame_id:
+            msg.header.frame_id = 'map'
+        goal_msg = NavigateToPose.Goal()
+        goal_msg.pose = msg
+        self.get_logger().info(
+            f'Forwarding nav goal: ({msg.pose.position.x:.2f}, '
+            f'{msg.pose.position.y:.2f}) frame={msg.header.frame_id}')
+        future = self._nav_action.send_goal_async(goal_msg)
+        future.add_done_callback(self._on_goal_response)
+
+    def _on_goal_response(self, future):
+        try:
+            handle = future.result()
+        except Exception as e:
+            self.get_logger().warn(f'send_goal_async failed: {e}')
+            self._publish_nav_result(-1)  # custom: send-goal failed
+            return
+        if not handle.accepted:
+            self.get_logger().warn('Nav goal REJECTED by /navigate_to_pose')
+            self._publish_nav_result(-2)  # custom: rejected
+            return
+        with self._nav_goal_lock:
+            self._nav_goal_handle = handle
+        self.get_logger().info('Nav goal accepted')
+        result_future = handle.get_result_async()
+        result_future.add_done_callback(self._on_goal_result)
+
+    def _on_goal_result(self, future):
+        try:
+            result = future.result()
+        except Exception as e:
+            self.get_logger().warn(f'get_result_async failed: {e}')
+            self._publish_nav_result(-3)  # custom: get-result failed
+            return
+        # action_msgs/GoalStatus: 4=succeeded, 5=cancelled, 6=aborted
+        status = int(getattr(result, 'status', 0))
+        self.get_logger().info(f'Nav goal finished (status={status})')
+        self._publish_nav_result(status)
+        with self._nav_goal_lock:
+            self._nav_goal_handle = None
+
+    def _publish_nav_result(self, status: int):
+        """Notify dashboard a goal has finished so the hint can re-show."""
+        try:
+            self._nav_result_pub.publish(Int8(data=int(status)))
+        except Exception as e:
+            self.get_logger().warn(f'nav_goal_result publish failed: {e}')
+
+    def _on_cancel_nav_goal(self, _msg: Empty):
+        """Cancel the active goal, if any."""
+        with self._nav_goal_lock:
+            handle = self._nav_goal_handle
+        if handle is None:
+            self.get_logger().info('cancel_nav_goal: no active goal')
+            return
+        self.get_logger().info('Cancelling active nav goal')
+        handle.cancel_goal_async()
 
     def destroy_node(self):
         self._stop_current()

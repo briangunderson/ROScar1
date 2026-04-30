@@ -200,12 +200,37 @@ function subscribeLandmarks() {
 
 function setupGoalClient() {
   const ros = getRos(); if (!ros) return;
-  // Bundled roslibjs (web/js/lib/roslib.min.js) exposes ActionClient + Goal
-  // (legacy API). Use those — ROSLIB.Action / .ActionGoal don't exist here.
-  goalActionClient = new ROSLIB.ActionClient({
-    ros,
-    serverName: '/navigate_to_pose',
-    actionName: 'nav2_msgs/action/NavigateToPose',
+  // Bundled roslibjs (1.x) only knows ROS1-style topic-based actionlib;
+  // ROS2 actions are service-based and the dashboard can't reach them
+  // directly. Workaround: publish a PoseStamped to /web/nav_goal —
+  // launch_manager_node forwards it to /navigate_to_pose. /web/cancel_nav_goal
+  // (Empty) cancels the active goal. /web/nav_goal_result (Int8) reports
+  // the outcome so we can clear the cancel button + restore the hint.
+  goalActionClient = {
+    pub: new ROSLIB.Topic({
+      ros, name: '/web/nav_goal',
+      messageType: 'geometry_msgs/PoseStamped',
+    }),
+    cancelPub: new ROSLIB.Topic({
+      ros, name: '/web/cancel_nav_goal',
+      messageType: 'std_msgs/Empty',
+    }),
+    resultSub: new ROSLIB.Topic({
+      ros, name: '/web/nav_goal_result',
+      messageType: 'std_msgs/Int8',
+    }),
+  };
+  goalActionClient.resultSub.subscribe((msg) => {
+    const code = msg.data | 0;
+    // 4=succeeded, 5=cancelled, 6=aborted, negative=our own send/result errors
+    let label = `status ${code}`;
+    if (code === 4) label = 'Goal reached!';
+    else if (code === 5) label = 'Goal cancelled';
+    else if (code === 6) label = 'Goal aborted';
+    else if (code < 0)   label = 'Goal failed to start';
+    toast(label, code === 4 ? 'ok' : 'err');
+    goalHandle = null;
+    updateGoalUI();
   });
 }
 
@@ -757,7 +782,10 @@ function setupControls() {
 
 // ── Nav2 goal ───────────────────────────────────────────────────────────────
 function sendNavGoal(canvasX, canvasY) {
-  if (!goalActionClient) { toast('Nav2 not connected', 'err'); return; }
+  if (!goalActionClient) setupGoalClient();
+  if (!goalActionClient || !goalActionClient.pub) {
+    toast('Nav2 not connected', 'err'); return;
+  }
 
   let ux = canvasX, uy = canvasY;
 
@@ -777,41 +805,30 @@ function sendNavGoal(canvasX, canvasY) {
   const wx  = mapData.origin.x + mpx * mapData.resolution;
   const wy  = mapData.origin.y + mpy * mapData.resolution;
 
-  // Legacy ROSLIB.Goal API: construct Goal bound to client, attach event
-  // handlers, then send().
-  goalHandle = new ROSLIB.Goal({
-    actionClient: goalActionClient,
-    goalMessage: {
-      pose: {
-        header: { frame_id: 'map' },
-        pose: {
-          position: { x: wx, y: wy, z: 0 },
-          orientation: { x: 0, y: 0, z: 0, w: 1 },
-        },
-      },
+  // Publish PoseStamped to /web/nav_goal — launch_manager_node has an
+  // ActionClient subscribed there that forwards the goal to /navigate_to_pose.
+  // We get no result feedback this way, so goalHandle is a sentinel rather
+  // than a roslibjs Goal: present = "we sent one and haven't cancelled it",
+  // null = idle.
+  goalActionClient.pub.publish(new ROSLIB.Message({
+    header: { frame_id: 'map' },
+    pose: {
+      position: { x: wx, y: wy, z: 0 },
+      orientation: { x: 0, y: 0, z: 0, w: 1 },
     },
-  });
-  goalHandle.on('result', () => {
-    goalHandle = null;
-    toast('Goal reached!', 'ok');
-    updateGoalUI();
-  });
-  // No-op feedback handler (could surface ETA / distance remaining later).
-  goalHandle.on('feedback', () => {});
-  goalHandle.send();
+  }));
+  goalHandle = { sentAt: Date.now(), wx, wy };
 
   toast(`Nav goal: (${wx.toFixed(2)}, ${wy.toFixed(2)})`, 'ok');
-  // Keep navGoalMode = true so the "TAP MAP TO SET GOAL" hint reappears
-  // automatically once the goal finishes (or is cancelled). Hint visibility
-  // gated on `goalHandle` presence anyway — see updateGoalUI.
+  // Keep navGoalMode = true so the hint reappears once the goal finishes.
   updateGoalUI();
 }
 
 function cancelGoal() {
-  if (goalHandle) {
-    try { goalHandle.cancel(); } catch (_) {}
-    goalHandle = null;
+  if (goalHandle && goalActionClient && goalActionClient.cancelPub) {
+    try { goalActionClient.cancelPub.publish(new ROSLIB.Message({})); } catch (_) {}
   }
+  goalHandle = null;
   toast('Goal cancelled');
   navGoalMode = true;
   updateGoalUI();
