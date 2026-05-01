@@ -4,11 +4,12 @@
 A ROS2 Jazzy workspace for a 4WD Mecanum wheel robot built on:
 - **Raspberry Pi 5** (Ubuntu 24.04 Server) running ROS2
 - **YB-ERF01-V3.0** (Yahboom STM32F103RCT6 motor driver board) connected via USB serial
-- **Logitech webcam** for vision
+- **Intel RealSense D435i** depth + RGB camera (replaces the original Logitech webcam)
 - **RPLIDAR C1** (Slamtec) for 2D laser scanning, connected via USB
 - **4x DC encoder motors** with mecanum wheels
+- **WSL2 GPU PC** (RTX 4070) running ArUco + YOLO detectors over CycloneDDS
 
-**Status**: Milestones 1-3 fully verified. Milestone 4 SLAM + Nav2 verified on hardware (slam_toolbox publishing /map, Nav2 accepting and completing navigation goals). Web dashboard implemented (roscar_web package + roscar_interfaces).
+**Status**: Milestones 1-3 fully verified. Milestone 4 SLAM + Nav2 verified on hardware. Web dashboard implemented. Working-state tag `working-slam-nav-2026-04-30`. D435i depth integrated into nav stack (PR #28 adds `/scan_depth` as a 2nd local-costmap obstacle source) and into YOLO detections (PR #30 adds 3D pose to each detection). Cliff detector exists as opt-in / draft (PR #29).
 
 ## Architecture
 The STM32 board handles PID motor control and mecanum inverse kinematics internally.
@@ -60,6 +61,10 @@ Key: EKF owns odom->base_footprint TF (driver publish_odom_tf=false)
 | `scripts/roscar-recovery.py` | Standalone recovery HTTP server (port 9999) |
 | `roscar_ws/src/roscar_driver/roscar_driver/landmark_localizer_node.py` | ArUco marker-based pose correction |
 | `roscar_ws/src/roscar_driver/config/landmark_params.yaml` | Landmark localizer config |
+| `roscar_ws/src/roscar_driver/roscar_driver/cliff_detector_node.py` | D435i cliff/dropoff detector (PR #29, opt-in) |
+| `roscar_ws/src/roscar_bringup/launch/depth_camera.launch.py` | D435i bringup + depthimage_to_laserscan + optional cliff_detector |
+| `roscar_ws/src/roscar_bringup/config/realsense_params.yaml` | D435i driver config (resolutions, decimation, IMU off) |
+| `docs/superpowers/specs/2026-04-30-d435i-obstacle-avoidance.md` | D435i obstacle/cliff/voxel roadmap |
 | `scripts/setup_rpi.sh` | RPi5 initial setup script |
 | `docs/chassis/fusion360/roscar_v2_chassis.py` | Fusion 360 parametric chassis model script (rev13 — STEP imports for frame, simple placeholders for electronics) |
 | `docs/chassis/models/` | 3D models: 3030 extrusion, brackets, T-nuts (STEP/IGES/F3D) |
@@ -91,15 +96,20 @@ Key: EKF owns odom->base_footprint TF (driver publish_odom_tf=false)
 | `/scan_raw` | LaserScan | sllidar_node | RPLIDAR C1 raw laser scan (includes chassis reflections) |
 | `/scan` | LaserScan | laser_filter | Filtered scan (chassis reflections < 0.15m removed) |
 | `/odometry/filtered` | Odometry | ekf_node | Fused odometry (wheels+IMU) |
-| `/image_raw` | Image | v4l2_camera | Camera feed (640x480, 30fps) |
-| `/camera_info` | CameraInfo | v4l2_camera | Camera calibration info |
+| `/image_raw` | Image | realsense2 (color, remapped) | Camera feed (424×240×30, color stream of D435i) |
+| `/camera_info` | CameraInfo | realsense2 (color, remapped) | Camera intrinsics (K matrix) |
+| `/camera/camera/depth/image_rect_raw` | Image | realsense2 | Raw depth image (640×480×16-bit, mm) |
+| `/camera/camera/depth/color/points` | PointCloud2 | realsense2 | RGB-aligned point cloud (when align_depth=true) |
+| `/camera/camera/aligned_depth_to_color/image_raw` | Image | realsense2 | Depth resampled to color image dims (424×240×16-bit, mm) — used for distance-keyed YOLO |
+| `/scan_depth` | LaserScan | depthimage_to_laserscan (depth_to_scan node) | Virtual 2D scan from D435i depth, horizontal slice 0.05–0.50 m above floor (PR #28) |
+| `/cliff_obstacles` | PointCloud2 | cliff_detector | Virtual obstacle points where the floor should be visible but isn't (PR #29, opt-in) |
 | `/map` | OccupancyGrid | slam_toolbox | SLAM-generated map |
 | `/plan` | Path | planner_server | Global navigation path |
 | `/local_plan` | Path | controller_server | Local trajectory |
 | `/aruco/markers` | MarkerArray | aruco_detector_node | Detected ArUco marker visualizations |
 | `/aruco/image` | Image | aruco_detector_node | Debug view with marker outlines |
-| `/detections` | Detection2DArray | yolo_detector_node | YOLO detection results |
-| `/image_annotated` | Image | yolo_detector_node | Camera feed with bounding boxes |
+| `/detections` | Detection2DArray | yolo_detector_node | YOLO detection results, with 3D pose back-projected from D435i depth (PR #30) |
+| `/image_annotated` | Image | yolo_detector_node | Camera feed with bounding boxes + distance overlay |
 
 ## Rosmaster_Lib API (Key Methods)
 - `Rosmaster(car_type=1, com='/dev/roscar_board', delay=0.002)` - Constructor
@@ -260,6 +270,61 @@ ros2 launch roscar_bringup navigation.launch.py map:=$HOME/maps/my_map.yaml
 | vx | -0.2 | 0.5 | m/s |
 | vy | -0.3 | 0.3 | m/s (strafing) |
 | wz | -2.0 | 2.0 | rad/s |
+
+## D435i Obstacle Pipeline
+
+The 2D RPLIDAR scan plane sits at z ≈ 0.295 m above the floor — anything
+below it (table edges, chair seats, low boxes, dog beds, cables on the
+floor) is invisible to a lidar-only nav stack. The D435i fills that gap.
+
+### Topology
+```
+realsense2_camera ─── /camera/camera/depth/image_rect_raw ──┐
+                       /camera/camera/depth/camera_info ───┐│
+                                                           ││
+                                                           vv
+                          depthimage_to_laserscan
+                          (depth_to_scan node) ─── /scan_depth (LaserScan)
+                                                           │
+                                            cliff_detector (opt-in, PR #29)
+                                            └── /cliff_obstacles (PointCloud2)
+                                                           │
+                                                           v
+                                local_costmap.obstacle_layer
+                                  ├─ scan        (RPLIDAR, plane at 0.295 m)
+                                  ├─ scan_depth  (D435i depth slice 0.05–0.50 m)
+                                  └─ cliff_obstacles  (D435i, opt-in)
+```
+
+### What's enabled by default (PR #28)
+- D435i runs whenever `use_depth=true` (the default)
+- `depth_to_scan` (depthimage_to_laserscan) publishes `/scan_depth` at ~15 Hz
+- `local_costmap.obstacle_layer` consumes `/scan_depth` as a 2nd source
+- `use_depth=false` cleanly falls back to lidar-only — obstacle_layer
+  tolerates the missing source and the depth nodes don't start
+- Global costmap stays lidar-only (D435i 3 m range vs lidar 12 m — no value)
+
+### What's opt-in (PR #29, draft)
+- `cliff_detector` Python node — fits per-pixel "expected floor depth"
+  against actual depth, emits `/cliff_obstacles` PointCloud2 where the
+  floor should be visible but isn't
+- Gated behind `use_cliff_detector:=true` (default false). Adds ~18 % CPU
+  on the Pi5, sensitive to camera-pitch calibration error
+- `obstacle_layer` lists `cliff_obstacles` permanently; tolerates missing
+  source the same way
+
+### Why depthimage_to_laserscan and not pointcloud_to_laserscan
+Verified on hardware (2026-04-30): `pointcloud_to_laserscan_node` works
+fine via `ros2 run` after the stack is up, but silently fails when
+launched via `launch_ros.actions.Node` alongside the realsense camera —
+the internal `message_filters::TfFilter` loses every cloud frame with no
+logged error. A 10 s `TimerAction` startup delay didn't fix it.
+`depthimage_to_laserscan` takes the depth image + camera_info directly
+(no message_filters chain) and works reliably under launch_ros. It's
+also cheaper — skips the realsense pointcloud-generation step entirely.
+
+### Spec
+`docs/superpowers/specs/2026-04-30-d435i-obstacle-avoidance.md`
 
 ## Web Dashboard (roscar_web)
 
@@ -462,20 +527,39 @@ sudo systemctl start roscar-recovery
 CV processing runs on the dev PC (RTX 4070 via WSL2), NOT on the Pi. Images flow from Pi → PC over CycloneDDS, get processed, and annotated images flow back.
 
 ```
-RPi5 (Robot)                          Windows PC (WSL2)
-┌─────────────┐    CycloneDDS     ┌──────────────────────────┐
-│ v4l2_camera  │───/image_raw────>│ aruco_detector_node      │
-│              │                   │   -> /aruco/markers      │
-│              │                   │   -> /aruco/image        │
-│              │                   │   -> TF (marker poses)   │
-│              │                   │                          │
-│              │                   │ yolo_detector_node       │
-│              │                   │   -> /detections         │
-│              │                   │   -> /image_annotated    │
-│ web_video    │<──/image_annotated│ GPU: RTX 4070 (CUDA)    │
-│ _server      │                   └──────────────────────────┘
-└─────────────┘
+RPi5 (Robot)                                 Windows PC (WSL2)
+┌──────────────┐    CycloneDDS            ┌──────────────────────────┐
+│ realsense2   │───/image_raw────────────>│ aruco_detector_node      │
+│ (D435i)      │                           │   -> /aruco/markers      │
+│              │                           │   -> /aruco/image        │
+│              │                           │   -> TF (marker poses)   │
+│              │                           │                          │
+│              │───/image_raw────────────>│ yolo_detector_node       │
+│              │───/aligned_depth────────>│   -> /detections (with    │
+│              │───/camera_info──────────>│      3D pose, PR #30)     │
+│              │                           │   -> /image_annotated    │
+│ web_video    │<──/image_annotated───────│ GPU: RTX 4070 (CUDA)    │
+│ _server      │                           └──────────────────────────┘
+└──────────────┘
 ```
+
+**Distance-keyed YOLO (PR #30):** the YOLO node back-projects each detection's
+bbox center pixel using the aligned depth image and color camera_info K
+matrix, populating `det.results[0].pose.pose.position` with a real 3D point
+in `camera_color_optical_frame` (x=right, y=down, z=forward). Dashboard
+shows `"1 person 1.4m"`. `z=0` means depth was unavailable for that bbox.
+
+### WSL2 deployment (NOT a git checkout)
+`~/roscar_ws/src/roscar_cv` on WSL2 is **not** a git checkout — it was
+deployed by hand. To pick up source changes from master:
+```bash
+wsl -d Ubuntu-24.04 -- bash -lc "
+  cp /mnt/d/localrepos/ROScar1/roscar_ws/src/roscar_cv/roscar_cv/*.py \
+     ~/roscar_ws/src/roscar_cv/roscar_cv/
+  cd ~/roscar_ws && colcon build --packages-select roscar_cv
+  sudo systemctl restart roscar-cv"
+```
+roscar-cv.service is enabled and starts on WSL2 boot.
 
 ### Launch (on WSL2 dev PC)
 ```bash
@@ -661,6 +745,11 @@ The EKF uses `imu/data_raw` directly (bypassing Madgwick filter) for angular vel
 - [ ] Verify landmark drift correction end-to-end (markers learn correctly, correction needs real-world testing)
 - [ ] Add landmark_localizer to navigation.launch.py with `load_learned: true`
 - [ ] **Chassis v2**: Design and build new 3030 aluminum extrusion chassis (spec: `docs/superpowers/specs/2026-04-04-extrusion-chassis-design.md`)
+- [x] **D435i obstacle avoidance**: depth → `/scan_depth` → 2nd local-costmap source (PR #28)
+- [x] **D435i distance-keyed YOLO**: detection.pose populated with 3D point in camera frame (PR #30)
+- [ ] **D435i cliff detection**: `/cliff_obstacles` PointCloud2, opt-in via `use_cliff_detector:=true` (PR #29 draft) — needs camera-pitch calibration to reduce false positives, ~18 % CPU on Pi5
+- [ ] **D435i pitch calibration**: fit floor plane from depth, recover pitch angle, update URDF — would unlock #29
+- [ ] **D435i voxel layer (Phase B)**: full 3D obstacle detection via `nav2_costmap_2d::VoxelLayer` instead of just the 2D scan slice (only worth it after CPU optimization)
 
 ## Chassis v2 Design (Parallel Development)
 
