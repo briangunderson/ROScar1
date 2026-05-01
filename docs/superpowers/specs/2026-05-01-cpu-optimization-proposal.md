@@ -163,6 +163,50 @@ T1c and T1d need separate treatment (T1c is investigative; T1d is a systemd unit
 
 Tier 2 and 3 are NOT in this PR. They need explicit user go/no-go.
 
+## 6b. Measured results (post-deploy, slam_nav idle, 2026-05-01 15:44)
+
+| Process | Before T1 (15:39) | After T1 (15:44) | Δ |
+|---|---|---|---|
+| nav2_container | 42.8 | 46.0 | +3.2 (variance) |
+| realsense2_camera | 19.4 | 23.4 | **+4.0 (regression!)** |
+| **joint_state_publisher** | **10.5** | **— (gone)** | **−10.5** ✅ |
+| driver_node | 21.2 | 14.6 | −6.6 |
+| detection_world | 19.0 | 12.0 | −7.0 |
+| sync_slam_toolbox | 7.0 | 3.7 | −3.3 |
+| ekf_node | 6.5 | 3.6 | −2.9 |
+| robot_state_publisher | 4.6 | not in top 15 | small |
+| **Net process drops** | | | **~30 %** |
+| **Net process adds** | | | **~7 %** |
+
+**Real win: ~23 % aggregate CPU back, dominated by joint_state_publisher removal.**
+
+### Honest reporting on the parts that didn't deliver
+
+**T1a (realsense diet) underperformed.** I estimated 5–10 % CPU savings; measured ~0 % (realsense actually went UP 4 % in the snapshot, which is likely measurement variance). Possible reasons:
+- Pointcloud generation may have been cheaper than I assumed — realsense's NEON-accelerated path is probably efficient.
+- Temporal filter may not have been the cost driver I thought.
+- The DDS publish overhead I expected to save (no more 9 MB/s of unused pointcloud traffic) likely shows up as savings in OTHER processes (rosbridge, network stack) rather than realsense itself.
+
+**Net assessment of T1a:** still defensible — we removed dead code (zero-subscriber topic), reduced internal bandwidth, and gained no functional regression. Whether it shows as Pi CPU is moot. But the proposal's quantitative claim was too optimistic; trim that estimate to "0–5 %" and note the win is correctness, not measurable speed.
+
+**T1b (joint_state_publisher) overperformed expectations.** Estimated 5–10 %; measured −10.5 %. That alone justifies the whole PR.
+
+### What this changes about the Tier 2/3 plan
+
+**T2a (move slam_toolbox to WSL2) becomes more attractive, not less.** sync_slam_toolbox dropped 3.3 % on its own when other contention eased — that's evidence of CPU starvation. Moving it off-Pi should clear all of that AND the residual ~4 % of map_saver_server which is co-located.
+
+**T1c (map_saver_server idle floor)** still a bug worth investigating — 5.5 % when nothing is being saved.
+
+**T1d (chrt priority)** still recommended. The 4 % realsense regression in the snapshot above is exactly the kind of contention that priority pinning prevents from cascading.
+
+### Production behavior after T1
+
+- Load avg progression during settling: 6.04 → 4.06 → 2.36 (1m → 5m → 15m). Consistent with normal startup spike.
+- Lifecycle manager reports active.
+- /tf at 70 Hz (healthy).
+- /scan_depth at 11 Hz (was 10–13 before — same).
+- Zero TF errors in 2 minutes.
+
 ## 7. Defend-me list (positions I expect pushback on)
 
 - **"Don't break wheel rotation in RViz"** — Counter: nobody's looking at wheel rotation in RViz during ops. Cosmetic-only.
