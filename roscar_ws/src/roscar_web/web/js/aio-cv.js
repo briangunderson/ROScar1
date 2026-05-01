@@ -47,14 +47,29 @@ function subscribeDetections() {
 }
 
 function summarizeDetections(detections) {
-  const counts = {};
+  // Group by class and track the closest distance for each class.
+  // Class name lives at det.results[0].hypothesis.class_id; det.id is
+  // a tracker handle (not the class). Distance, when available, is
+  // det.results[0].pose.pose.position.z (depth in meters from the
+  // camera optical frame). 0.0 means "unknown" — D435i not running or
+  // the bbox center had no valid depth return.
+  const groups = {};
   for (const det of detections) {
-    // det.id contains class name (set by yolo_detector_node)
-    const name = det.id || 'unknown';
-    counts[name] = (counts[name] || 0) + 1;
+    const hyp = (det.results && det.results[0]) || null;
+    const name = (hyp && hyp.hypothesis && hyp.hypothesis.class_id)
+      || det.id
+      || 'unknown';
+    const z = hyp && hyp.pose && hyp.pose.pose && hyp.pose.pose.position
+      ? Number(hyp.pose.pose.position.z) || 0
+      : 0;
+    if (!groups[name]) groups[name] = { count: 0, minDist: 0 };
+    groups[name].count += 1;
+    if (z > 0 && (groups[name].minDist === 0 || z < groups[name].minDist)) {
+      groups[name].minDist = z;
+    }
   }
-  return Object.entries(counts)
-    .map(([cls, count]) => ({ cls, count }))
+  return Object.entries(groups)
+    .map(([cls, info]) => ({ cls, count: info.count, minDist: info.minDist }))
     .sort((a, b) => b.count - a.count);
 }
 
@@ -86,8 +101,14 @@ function updateDetectionOverlay() {
     return;
   }
   el.style.display = '';
+  // Format: "2 person 1.4m · 1 chair · 1 cup 0.6m"
+  // Distance shown only when > 0 (D435i sees the object); count alone
+  // when depth is unknown.
   el.textContent = lastDetections
-    .map(d => `${d.count} ${d.cls}`)
+    .map(d => {
+      const dist = d.minDist > 0 ? ` ${d.minDist.toFixed(1)}m` : '';
+      return `${d.count} ${d.cls}${dist}`;
+    })
     .join(' · ');
 }
 
