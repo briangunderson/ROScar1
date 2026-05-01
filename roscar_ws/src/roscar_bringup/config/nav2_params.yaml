@@ -139,7 +139,11 @@ controller_server:
       sim_time: 1.5
       linear_granularity: 0.05
       angular_granularity: 0.025
-      transform_tolerance: 0.5
+      # 2026-05-01: bumped 0.5 → 1.0 after a goal failed at 524 ms tf age
+      # under load avg 8.9. slam_toolbox's map→odom can lag this much
+      # under CPU pressure on the Pi5; 0.5 was too tight.
+      # See tasks/postmortem-2026-05-01-nav-tf-stall.md.
+      transform_tolerance: 1.0
       xy_goal_tolerance: 0.15
       trans_stopped_velocity: 0.25
       short_circuit_trajectory_evaluation: true

@@ -100,12 +100,21 @@ class DetectionWorldNode(Node):
         self.declare_parameter('max_age_sec', 3.0)
         self.declare_parameter('min_confidence', 0.5)
         self.declare_parameter('tf_timeout_sec', 0.1)
+        # Rate-limit how often the input callback actually does work.
+        # /detections arrives at YOLO's frame rate (~15 Hz). The output
+        # publishes at 2 Hz anyway, so processing every input frame
+        # wastes CPU for no UI gain. 3 Hz processing is plenty.
+        # See tasks/postmortem-2026-05-01-nav-tf-stall.md.
+        self.declare_parameter('process_rate_hz', 3.0)
 
         self._cam_frame = str(self.get_parameter('camera_frame').value)
         self._map_frame = str(self.get_parameter('map_frame').value)
         self._max_age = float(self.get_parameter('max_age_sec').value)
         self._min_conf = float(self.get_parameter('min_confidence').value)
         self._tf_timeout = float(self.get_parameter('tf_timeout_sec').value)
+        proc_hz = float(self.get_parameter('process_rate_hz').value)
+        self._min_process_interval = 1.0 / proc_hz if proc_hz > 0 else 0.0
+        self._last_processed_at = 0.0
 
         # TF buffer for camera→map lookup
         self._tf_buffer = Buffer()
@@ -141,14 +150,22 @@ class DetectionWorldNode(Node):
 
         self.get_logger().info(
             f'detection_world ready: {self._cam_frame} → {self._map_frame}, '
-            f'{rate_hz:.1f} Hz, max_age={self._max_age:.1f}s, '
-            f'min_conf={self._min_conf:.2f}'
+            f'pub={rate_hz:.1f}Hz process<={proc_hz:.1f}Hz '
+            f'max_age={self._max_age:.1f}s min_conf={self._min_conf:.2f}'
         )
 
     # ------------------------------------------------------------------
     def _on_detections(self, msg: Detection2DArray) -> None:
         if not msg.detections:
             return
+        # Skip frames that arrive faster than process_rate_hz. The
+        # callback still receives every YOLO message (executor delivers
+        # them) but we just early-out without doing TF lookups, deque
+        # pushes, or any of the per-frame work.
+        now_mono = time.monotonic()
+        if now_mono - self._last_processed_at < self._min_process_interval:
+            return
+        self._last_processed_at = now_mono
         # Look up camera→map ONCE per message (all detections share the
         # same timestamp). Use the LATEST available transform — the
         # detection timestamp may be slightly behind the latest /tf,
