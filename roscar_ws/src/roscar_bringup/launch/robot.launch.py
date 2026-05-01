@@ -108,6 +108,30 @@ def generate_launch_description():
         output='screen',
     )
 
+    # -- Detection world bridge --
+    # Republishes /detections (Detection2DArray, in camera frame) as
+    # /detections_world (std_msgs/String JSON, in map frame). The
+    # dashboard map plots the JSON. Only meaningful when the depth
+    # camera is running (PR #30 populates the 3D pose used here);
+    # gated on use_depth so it doesn't churn TF lookups in lidar-only
+    # mode where /detections poses are all zero anyway.
+    detection_world_node = Node(
+        package='roscar_driver',
+        executable='detection_world',
+        name='detection_world',
+        parameters=[{
+            'input_topic': '/detections',
+            'output_topic': '/detections_world',
+            'camera_frame': 'camera_color_optical_frame',
+            'map_frame': 'map',
+            'publish_rate_hz': 2.0,
+            'max_age_sec': 3.0,
+            'min_confidence': 0.5,
+        }],
+        condition=IfCondition(LaunchConfiguration('use_depth')),
+        output='screen',
+    )
+
     return LaunchDescription([
         publish_odom_tf_arg,
         use_lidar_arg,
@@ -120,4 +144,5 @@ def generate_launch_description():
         depth_camera_launch,
         imu_filter_node,
         ekf_node,
+        detection_world_node,
     ])

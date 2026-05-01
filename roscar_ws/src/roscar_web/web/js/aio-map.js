@@ -51,6 +51,11 @@ let initPoseDrag = null;  // {x0, y0, x1, y1} canvas coords during drag
 
 // Landmark markers from /landmark/known_markers
 let landmarkSub = null;
+
+// World-frame YOLO detections from /detections_world (PR #33)
+// Each: { class, score, x, y, z, dist_m }
+let worldDetections = [];
+let detectionsWorldSub = null;
 let knownMarkers = [];  // [{id, x, y, yaw, visible}]
 
 let rafId = null;
@@ -62,7 +67,10 @@ export function initMap(getRosFn) {
   setupControls();
   setupResizeObserver();
   onAppEvent((ev) => {
-    if (ev === 'connected') { subscribeMap(); subscribePose(); subscribeTF(); subscribeLandmarks(); }
+    if (ev === 'connected') {
+      subscribeMap(); subscribePose(); subscribeTF();
+      subscribeLandmarks(); subscribeDetectionsWorld();
+    }
   });
   startRAFLoop();
 }
@@ -195,6 +203,27 @@ function subscribeLandmarks() {
       knownMarkers = JSON.parse(msg.data);
       needsDraw = true;
     } catch (_) {}
+  });
+}
+
+/** Subscribe to YOLO detections republished in map frame (PR #33). */
+function subscribeDetectionsWorld() {
+  const ros = getRos(); if (!ros) return;
+  if (detectionsWorldSub) {
+    try { detectionsWorldSub.unsubscribe(); } catch (_) {}
+  }
+  detectionsWorldSub = new ROSLIB.Topic({
+    ros, name: '/detections_world', messageType: 'std_msgs/String',
+    throttle_rate: 500, // 2 Hz publisher → no extra throttle needed
+  });
+  detectionsWorldSub.subscribe((msg) => {
+    try {
+      const payload = JSON.parse(msg.data);
+      worldDetections = Array.isArray(payload.objects) ? payload.objects : [];
+      needsDraw = true;
+    } catch (_) {
+      worldDetections = [];
+    }
   });
 }
 
@@ -395,6 +424,15 @@ function drawMap() {
     }
   }
 
+  // YOLO world-frame detections (PR #33)
+  if (worldDetections.length > 0 && mapData) {
+    if (robotLocked && robotPos) {
+      drawDetectionsLocked(ctx, c);
+    } else {
+      drawDetections(ctx);
+    }
+  }
+
   // Init-pose drag indicator (arrow from click point to current cursor)
   if (initPoseDrag) {
     const { x0, y0, x1, y1 } = initPoseDrag;
@@ -558,6 +596,73 @@ function drawMarkerIcon(ctx, sx, sy, id, visible) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
   ctx.fillText(`A${id}`, sx, sy - size - 2);
+
+  ctx.restore();
+}
+
+/** Draw YOLO detections (free / unlocked view). */
+function drawDetections(ctx) {
+  for (const d of worldDetections) {
+    const sp = mapToScreen(d.x, d.y);
+    if (!sp) continue;
+    drawDetectionIcon(ctx, sp.x, sp.y, d.class, d.dist_m);
+  }
+}
+
+/** Draw YOLO detections (locked / robot-centered view). */
+function drawDetectionsLocked(ctx, c) {
+  const ccx = c.width / 2, ccy = c.height / 2;
+  const cosA = Math.cos(robotPos.yaw);
+  const sinA = Math.sin(robotPos.yaw);
+  for (const d of worldDetections) {
+    const sp = mapToScreen(d.x, d.y);
+    if (!sp) continue;
+    const dx = sp.x - ccx, dy = sp.y - ccy;
+    const rx = dx * cosA - dy * sinA + ccx;
+    const ry = dx * sinA + dy * cosA + ccy;
+    drawDetectionIcon(ctx, rx, ry, d.class, d.dist_m);
+  }
+}
+
+// Stable per-class color pick. Hash the class name into a hue so the
+// same class always gets the same color across sessions, but two
+// different classes are visually distinguishable.
+function _classColor(cls) {
+  let h = 0;
+  for (let i = 0; i < cls.length; i++) {
+    h = ((h << 5) - h) + cls.charCodeAt(i);
+    h |= 0;
+  }
+  const hue = ((h % 360) + 360) % 360;
+  return `hsl(${hue}, 80%, 60%)`;
+}
+
+/** Triangle pointing up, with class + distance label. */
+function drawDetectionIcon(ctx, sx, sy, cls, distM) {
+  const size = 6;
+  const color = _classColor(cls);
+  ctx.save();
+
+  // Triangle outline
+  ctx.beginPath();
+  ctx.moveTo(sx, sy - size);
+  ctx.lineTo(sx + size, sy + size * 0.6);
+  ctx.lineTo(sx - size, sy + size * 0.6);
+  ctx.closePath();
+  ctx.fillStyle = color.replace(')', ', 0.25)').replace('hsl', 'hsla');
+  ctx.fill();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Label: "person 1.4m"
+  const dist = (typeof distM === 'number' && distM > 0)
+    ? ` ${distM.toFixed(1)}m` : '';
+  ctx.fillStyle = color;
+  ctx.font = '600 9px Rajdhani, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText(`${cls}${dist}`, sx, sy + size + 2);
 
   ctx.restore();
 }

@@ -24,6 +24,7 @@ setup(
         'console_scripts': [
             'driver_node = roscar_driver.driver_node:main',
             'landmark_localizer = roscar_driver.landmark_localizer_node:main',
+            'detection_world = roscar_driver.detection_world_node:main',
         ],
     },
 )
