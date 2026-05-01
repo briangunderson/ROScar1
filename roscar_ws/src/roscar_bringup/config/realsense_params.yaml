@@ -54,13 +54,19 @@
     rgb_camera.color_profile: "424x240x15"
 
     # --- Point cloud (Pi5 / aarch64 → NEON namespace) ---
-    pointcloud__neon_.enable: true
-    pointcloud__neon_.stream_filter: 2         # 2 = RS2_STREAM_COLOR (aligned pointcloud)
+    # 2026-05-01: DISABLED. Audit showed /camera/camera/depth/color/points
+    # has zero subscribers since we switched to depthimage_to_laserscan in
+    # PR #28. Pointcloud generation + DDS publish was burning ~5 % Pi CPU
+    # producing data nobody consumed. See
+    # docs/superpowers/specs/2026-05-01-cpu-optimization-proposal.md.
+    pointcloud__neon_.enable: false
+    pointcloud__neon_.stream_filter: 2         # kept for re-enable
     pointcloud__neon_.stream_index_filter: 0
     pointcloud__neon_.ordered_pc: false
     pointcloud__neon_.allow_no_texture_points: false
 
-    # Align depth to color so pointcloud has RGB + uses color intrinsics.
+    # Align depth to color: still needed because YOLO's distance-keying
+    # (PR #30) reads /camera/camera/aligned_depth_to_color/image_raw.
     align_depth.enable: true
 
     # --- Filters (post-processing) ---
@@ -68,9 +74,14 @@
     decimation_filter.enable: true
     decimation_filter.filter_magnitude: 2
 
-    # Spatial + temporal filters clean noise. Defaults are reasonable.
+    # Spatial filter cleans single-pixel depth noise that would otherwise
+    # produce false cliff_detector hits. Keep it.
     spatial_filter.enable: true
-    temporal_filter.enable: true
+    # Temporal filter (history buffer per pixel) is expensive (~2-3 % CPU)
+    # and depthimage_to_laserscan + cliff_detector both do their own
+    # range filtering downstream — temporal smoothing isn't load-bearing
+    # for any current consumer. Disabled 2026-05-01.
+    temporal_filter.enable: false
     hole_filling_filter.enable: false
 
     # --- IMU: DISABLED for now ---
