@@ -25,6 +25,7 @@ setup(
             'driver_node = roscar_driver.driver_node:main',
             'landmark_localizer = roscar_driver.landmark_localizer_node:main',
             'd435i_pitch_calibrator = roscar_driver.d435i_pitch_calibrator:main',
+            'detection_world = roscar_driver.detection_world_node:main',
         ],
     },
 )
