@@ -3,6 +3,13 @@ yolo_detector:
     model: "yolov8n.pt"
     confidence_threshold: 0.5
     device: "0"
-    detection_rate: 15.0
+    # 2026-05-01: dropped 15 → 5 Hz (post-mortem follow-up).
+    # 15 Hz was overkill for an indoor robot at < 0.5 m/s. Cutting to
+    # 5 Hz reduces WSL2→Pi bandwidth by 3x and detection_world's
+    # deserialization cost on the Pi proportionally — recovers ~5–10 %
+    # CPU on the Pi in nav mode. The CV-toggle annotated feed in the
+    # dashboard runs at this rate so it's slightly less smooth (5 fps),
+    # but object monitoring is still entirely usable.
+    detection_rate: 5.0
     classes: []
     annotate_image: true
