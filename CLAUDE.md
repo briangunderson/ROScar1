@@ -674,15 +674,66 @@ ros2 run rqt_graph rqt_graph        # Node graph
 ros2 run rqt_tf_tree rqt_tf_tree    # TF tree
 ```
 
-## Hardware Notes
+## Hardware BOM
 
-### RPLIDAR C1
-- Package: `sllidar_ros2` (build from source, cloned by setup_rpi.sh)
-- Serial: 460800 baud, CP210x USB chip (10c4:ea60)
-- udev symlink: `/dev/rplidar`
-- TF frame: `laser`
-- Publishes: `/scan` (sensor_msgs/LaserScan)
-- Launch arg: `use_lidar:=true|false` in robot.launch.py
+Bill of materials for the as-built robot. Update this section whenever a
+component is replaced or the wiring changes — future-Claude (and future-you)
+will save time if the rest of the doc can assume current truth.
+
+### Compute
+
+| Role | Part | Notes |
+|------|------|-------|
+| On-board SBC | Raspberry Pi 5 (8 GB) | Ubuntu 24.04 Server, NVMe SSD (not SD card), runs ROS2 Jazzy. Mirrored over WiFi to LAN; hostname `roscar.corp.channelonelabs.com`, IP 192.168.1.170. WiFi has been seen to drop under sustained CPU load — see post-mortem 2026-05-01. |
+| Off-board GPU PC | Windows desktop running WSL2 Ubuntu-24.04 | RTX 4070, also runs ROS2 Jazzy. Hosts the `roscar_cv` stack (ArUco + YOLO) and optionally the `slam_remote` node (T2a). LAN IP varies; CycloneDDS unicast peer set in cyclonedds.xml. |
+
+### Power
+
+| Item | Part | Specs |
+|------|------|-------|
+| **Battery** | [LiFePO4 12V 20Ah](https://www.amazon.com/dp/B0B6ZBZ8T7) | 4S LiFePO4 cells, 12.8 V nominal, ~14.4–14.6 V fully charged, ~10.0 V BMS cutoff. 20 Ah / 256 Wh. Built-in 20 A BMS. **Flat discharge curve** — voltage barely changes from 90 % SoC to 10 % SoC, so voltage-based SoC reads are unreliable. |
+| **Buck regulator** | (between battery and Yahboom) | LiFePO4 4S charges to ~14.7 V which exceeds the Yahboom YB-ERF01-V3.0's input rating (board complains "overvoltage"). Buck steps it down to ~12 V before feeding the Yahboom. The dashboard's `/battery_voltage` therefore reads the **post-buck** voltage, NOT the cell voltage — see `roscar_web/web/js/aio-status.js` `BATT_MIN`/`BATT_MAX` (currently uncalibrated for the buck — known stale, low priority). |
+| **Charger** | [14.6V / 10A LiFePO4 charger](https://www.amazon.com/dp/B0D8W1THH6) | Chemistry-matched (14.6 V absorption is the LiFePO4 spec, NOT a generic "12 V plus headroom"). 20 Ah at 10 A → ~2 h to full. |
+
+**Power-loss failure mode.** Yahboom's STM32 firmware monitors the post-buck input and triggers a "low battery fault" cutoff if voltage sags below its threshold. When this fires it kills 5 V to the Pi without warning — symptoms are: Pi goes silent mid-task, doesn't recover, requires a manual power switch flip. Observed 2026-05-03. Not a software bug we can fix; the answer is "don't run the battery flat, watch voltage trends."
+
+### Motor / control
+
+| Item | Part | Notes |
+|------|------|-------|
+| Motor driver board | **Yahboom YB-ERF01-V3.0** | STM32F103RCT6, USB serial via CH340 USB chip (1a86:7523), udev symlink `/dev/roscar_board`, 115200 baud. Closed-source firmware — handles PID + mecanum IK internally. Auto-reports 4 packets every 10ms (~40ms full cycle). Uses `Rosmaster_Lib` (built from Yahboom zip, not on PyPI) — see `set_car_motion(vx, vy, wz)`. |
+| Motors | 4× DC encoder motors | 1320 counts/rev (30:1 gear × 11 PPR × 4× quadrature). 16-bit counter, read every 10 ms (100 Hz PID loop on the STM32). Wired so M1=FL, M2=RL, M3=FR, M4=RR — matches firmware labels with correct polarity (+PWM = forward). |
+| Wheels | 4× mecanum wheels | 79.3 mm dia, 37.3 mm width, ABBA roller pattern (FL=A, FR=B, RL=B, RR=A viewed from front). |
+| IMU (on board) | **ICM20948** (NOT MPU9250 despite some Yahboom docs) | 9-axis, library auto-detects. I2C bit-bang on STM32 GPIO PB15 (SDA), PB13 (SCL), addr 0x68. Conversion: firmware pre-scales, library divides by 1/1000.0 for all axes. **Board mounted 180° rotated** about Z — driver pre-rotates raw data via sign flips on ax/ay/gx/gy/mx/my (plus separate az/gz corrections). See "Hardware Orientation" section below. |
+
+### Sensors
+
+| Item | Part | Notes |
+|------|------|-------|
+| Lidar | **Slamtec RPLIDAR C1** | 360° 2D laser, ~12 m range, 10 Hz typical scan rate. CP210x USB chip (10c4:ea60), udev `/dev/rplidar`, 460800 baud. Mounted on top of the camera mast; scan plane at z ≈ 0.295 m above floor. ROS2 driver: `sllidar_ros2` (built from source by setup_rpi.sh). Publishes `/scan` (sensor_msgs/LaserScan). Launch arg `use_lidar:=true|false`. |
+| Depth + RGB camera | **Intel RealSense D435i** | Replaces the original Logitech webcam. USB 3.0. Depth 640×480×15, color 424×240×30 (CPU-tuned for Pi5 — see `realsense_params.yaml`). On-camera IMU is **disabled** (STM32 IMU is the EKF source). Mounted on the front face of the mast at z ≈ 0.21 m above floor. Driver: `realsense2_camera`. Decimation magnitude 2 enabled; pointcloud generation **disabled** (PR #36, no consumers). Spatial filter on, temporal filter off. `align_depth.enable: true` (needed for distance-keyed YOLO, PR #30). |
+
+### Chassis (v2)
+
+| Item | Notes |
+|------|-------|
+| Frame | 3030 aluminum extrusion, ~250×250 mm two-deck sandwich. Lower deck for battery + buck + Yahboom + motors; upper deck for Pi5 + camera mast. |
+| Wheelbase / track | 213 mm wheelbase (front-to-rear axle), 325 mm track (left-to-right axle). Measured 2026-04-28. |
+| Mast | 3030 extrusion column at front of chassis, mast_y = +15 mm right of center. Lidar on top of mast (z = 0.295 m), D435i mounted on front face mid-height (z = 0.21 m). Mast yaw = π in URDF (lidar's 0° marker physically points -X). |
+| Motor brackets | 3D-printed PETG, parametric. Clamp to frame exterior (motors hang BELOW frame on L-brackets, NOT inside). |
+| Total mass | ~4.9 kg (vs ~3 kg for chassis v1). CoG at ~29 % of total height. |
+| Design spec | `docs/superpowers/specs/2026-04-04-extrusion-chassis-design.md` |
+| Fusion 360 model | `docs/chassis/fusion360/roscar_v2_chassis.py` |
+
+### USB / Device IDs (Pi side)
+
+| Device | VID:PID | udev symlink | Used by |
+|--------|---------|--------------|---------|
+| Yahboom YB-ERF01 (CH340) | 1a86:7523 | `/dev/roscar_board` | `roscar_driver` |
+| RPLIDAR C1 (CP210x) | 10c4:ea60 | `/dev/rplidar` | `sllidar_node` |
+| RealSense D435i (USB 3.0) | 8086:0b3a | (no symlink — librealsense uses serial) | `realsense2_camera` |
+
+udev rules live in `scripts/setup_rpi.sh`. Re-run it (or the relevant `udevadm` reload) after a system reset.
 
 ## Hardware Orientation
 The board is mounted 180-deg rotated on the chassis. Motor wiring has been physically
