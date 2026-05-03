@@ -113,7 +113,16 @@ controller_server:
       debug_trajectory_details: true
       # -- Velocity limits (mecanum holonomic) --
       min_vel_x: -0.4
-      max_vel_x: 0.8
+      # 2026-05-03: dropped 0.8 → 0.4 after a couch collision. At 0.65 m/s
+      # (the live slider value at the time), worst-case stop distance was
+      # ~50 cm: 0.21 m physics decel (decel_lim_x: 1.0) + ~29 cm sensor +
+      # costmap + controller latency at the live update rates. D435i
+      # range_min is 0.20 m, so any obstacle popping into view inside
+      # ~50 cm (in-place rotation, narrow approach angle) is unrecoverable.
+      # At 0.4 m/s the same math gives ~26 cm stop distance — comfortably
+      # inside the detection range. User can dial it back up via the
+      # dashboard's tune-vx slider when the environment is open.
+      max_vel_x: 0.4
       # Strafe is mechanically ~2x less efficient than forward driving on
       # mecanum (all four wheels work, only the lateral roller component
       # contributes to motion, rollers slip more than wheel tread, battery
@@ -301,7 +310,15 @@ local_costmap:
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         cost_scaling_factor: 3.0
-        inflation_radius: 0.10
+        # 2026-05-03: 0.10 → 0.15 after couch collision. At 0.10 the
+        # planner happily plans paths that pass within 10 cm of an
+        # obstacle's marked cells; combined with the controller's
+        # ~25 cm reaction window, that wasn't enough margin. 0.15 is
+        # still tight enough for indoor doorway passage (door ~75 cm,
+        # robot 38 cm wide → 18.5 cm clearance per side, plus 15 cm
+        # inflation = 3.5 cm overlap which is fine — costmap inflation
+        # is a soft cost gradient, not a hard wall).
+        inflation_radius: 0.15
       always_send_full_costmap: true
 
 global_costmap:
@@ -337,7 +354,8 @@ global_costmap:
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         cost_scaling_factor: 3.0
-        inflation_radius: 0.10
+        # Match local_costmap inflation (2026-05-03: 0.10 → 0.15)
+        inflation_radius: 0.15
       always_send_full_costmap: true
 
 # ========================
@@ -356,25 +374,43 @@ collision_monitor:
     transform_tolerance: 0.5
     source_timeout: 5.0
     stop_pub_timeout: 2.0
-    # Polygons define collision zones around the robot
-    # DISABLED: This small robot operates in tight spaces (walls within 15-20cm).
-    # The costmap inflation layer handles obstacle avoidance via the planner.
-    # Collision monitor polygons are kept but disabled so the node still passes
-    # lifecycle activation (Jazzy nav2_bringup requires it).
+    # 2026-05-03: ENABLED PolygonStop after couch collision (PR #36 dropped
+    # max_vel_x but the collision_monitor is the last-resort safety net for
+    # cases where the costmap-based avoidance is too late — fast lateral
+    # appearance, in-place rotation revealing a previously-occluded
+    # obstacle, etc).
+    #
+    # Polygon is asymmetric: more clearance forward (where the robot is
+    # going) than behind. 0.30 m forward gives ~14.5 cm space in front of
+    # the bumper (which is at +0.155 m). Sides are 0.22 m, just slightly
+    # outside the 0.19 m footprint half-width — narrow enough to navigate
+    # household doorways (75-cm doors clear by 5+ cm per side) but wide
+    # enough to catch furniture creep.
+    #
+    # If false-positives in tight passages become an issue, either shrink
+    # the polygon or switch action_type to "slowdown" (with slowdown_ratio).
     polygons: ["PolygonStop"]
     PolygonStop:
       type: polygon
       action_type: stop
-      points: "[[0.20, 0.22], [0.20, -0.22], [-0.20, -0.22], [-0.20, 0.22]]"
-      min_points: 8
-      visualize: false
+      # asymmetric: 0.30 forward, 0.22 sides, 0.20 rear
+      points: "[[0.30, 0.22], [0.30, -0.22], [-0.20, -0.22], [-0.20, 0.22]]"
+      min_points: 4
+      visualize: true
       polygon_pub_topic: polygon_stop
-      enabled: false
-    # Observation sources
-    observation_sources: ["scan"]
+      enabled: true
+    # Observation sources — BOTH the lidar AND the depth-derived scan.
+    # 2026-05-03: scan_depth was added because lidar (plane at 0.295 m)
+    # cannot see couches, chair seats, low boxes — all the things that
+    # caused the original collision. /scan_depth fills that gap.
+    observation_sources: ["scan", "scan_depth"]
     scan:
       type: scan
       topic: /scan
+      enabled: true
+    scan_depth:
+      type: scan
+      topic: /scan_depth
       enabled: true
 
 # Docking server (included by nav2_bringup in Jazzy — not used but must

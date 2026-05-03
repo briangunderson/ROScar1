@@ -24,14 +24,24 @@ let navActive = false;
 // Slider definitions: param name → { domId, default, type, format }
 // type 2 = integer, type 3 = double (rcl_interfaces/msg/ParameterType)
 const PARAMS = [
-  { dom: 'tune-vx',         param: 'FollowPath.max_vel_x', type: 3, def: 0.8,  fmt: v => v.toFixed(2) },
+  // 2026-05-03: default 0.8 → 0.4 after couch collision. See nav2_params.yaml
+  // and the collision PR for the math: at 0.65 m/s (the user's tuned-up
+  // value at the time) worst-case stop distance was ~50 cm vs D435i's
+  // 20 cm range_min. New default of 0.4 m/s gives ~26 cm stop distance,
+  // well inside detection range. User can tune up via the slider when
+  // the environment is open.
+  { dom: 'tune-vx',         param: 'FollowPath.max_vel_x', type: 3, def: 0.4,  fmt: v => v.toFixed(2) },
   { dom: 'tune-vy',         param: 'FollowPath.max_vel_y', type: 3, def: 0.2,  fmt: v => v.toFixed(2),
     // mirror sign onto min_vel_y (so strafe is symmetric)
     mirror: { param: 'FollowPath.min_vel_y', type: 3, transform: v => -v } },
   { dom: 'tune-vy-samples', param: 'FollowPath.vy_samples', type: 2, def: 3,  fmt: v => `${v|0}` },
   { dom: 'tune-twirl',      param: 'FollowPath.Twirling.scale', type: 3, def: 10, fmt: v => `${v|0}` },
 ];
-const STORAGE_KEY = 'roscar_nav_tuning_v1';
+// v1 → v2 (2026-05-03): bumped to invalidate stored slider values from
+// before the post-couch-collision speed reduction. v1 users had ~0.65
+// m/s saved; without this bump the slider would re-push the unsafe
+// value on every nav launch, defeating the YAML default change.
+const STORAGE_KEY = 'roscar_nav_tuning_v2';
 
 export function initNavTuning(getRosFn) {
   getRos = getRosFn;
