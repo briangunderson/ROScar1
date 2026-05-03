@@ -58,6 +58,17 @@ let worldDetections = [];
 let detectionsWorldSub = null;
 let knownMarkers = [];  // [{id, x, y, yaw, visible}]
 
+// PR #39 collision_monitor PolygonStop visualization. The polygon is in
+// base_footprint frame (fixed shape relative to the robot); we transform
+// to map frame at draw time using robotPos. `triggered` flips true when
+// /collision_monitor/collision_points_marker has any points inside the
+// polygon — color goes amber → red so you can see WHY the robot stopped.
+let collisionPolygonPoints = null;        // [{x,y}, ...] in base_footprint frame
+let collisionPolygonTriggered = false;
+let collisionPolygonSub = null;
+let collisionPointsSub = null;
+let lastCollisionTriggerMs = 0;
+
 let rafId = null;
 let needsDraw = true;
 
@@ -70,6 +81,7 @@ export function initMap(getRosFn) {
     if (ev === 'connected') {
       subscribeMap(); subscribePose(); subscribeTF();
       subscribeLandmarks(); subscribeDetectionsWorld();
+      subscribeCollisionPolygon();
     }
   });
   startRAFLoop();
@@ -223,6 +235,44 @@ function subscribeDetectionsWorld() {
       needsDraw = true;
     } catch (_) {
       worldDetections = [];
+    }
+  });
+}
+
+/** PR #39: subscribe to the collision_monitor PolygonStop visualization
+ *  topic. The PolygonStamped is published in base_footprint frame; we
+ *  rotate+translate by the robot's current pose at draw time. Also
+ *  watches collision_points_marker — when non-empty, a point is inside
+ *  the polygon, so we color it red. The "triggered" flag has a 1 s
+ *  hangover so a single trigger frame doesn't disappear instantly. */
+function subscribeCollisionPolygon() {
+  const ros = getRos(); if (!ros) return;
+  if (collisionPolygonSub) try { collisionPolygonSub.unsubscribe(); } catch (_) {}
+  if (collisionPointsSub) try { collisionPointsSub.unsubscribe(); } catch (_) {}
+
+  collisionPolygonSub = new ROSLIB.Topic({
+    ros, name: '/polygon_stop',
+    messageType: 'geometry_msgs/PolygonStamped',
+    throttle_rate: 250,
+  });
+  collisionPolygonSub.subscribe((msg) => {
+    if (!msg.polygon || !msg.polygon.points) return;
+    collisionPolygonPoints = msg.polygon.points.map(p => ({ x: p.x, y: p.y }));
+    needsDraw = true;
+  });
+
+  collisionPointsSub = new ROSLIB.Topic({
+    ros, name: '/collision_monitor/collision_points_marker',
+    messageType: 'visualization_msgs/Marker',
+    throttle_rate: 200,
+  });
+  collisionPointsSub.subscribe((msg) => {
+    const hot = !!(msg.points && msg.points.length > 0);
+    if (hot) lastCollisionTriggerMs = Date.now();
+    const newTrig = hot || (Date.now() - lastCollisionTriggerMs) < 1000;
+    if (newTrig !== collisionPolygonTriggered) {
+      collisionPolygonTriggered = newTrig;
+      needsDraw = true;
     }
   });
 }
@@ -430,6 +480,15 @@ function drawMap() {
       drawDetectionsLocked(ctx, c);
     } else {
       drawDetections(ctx);
+    }
+  }
+
+  // PR #39: collision_monitor PolygonStop visualization
+  if (collisionPolygonPoints && robotPos && mapData) {
+    if (robotLocked) {
+      drawCollisionPolygonLocked(ctx, c);
+    } else {
+      drawCollisionPolygon(ctx);
     }
   }
 
@@ -664,6 +723,71 @@ function drawDetectionIcon(ctx, sx, sy, cls, distM) {
   ctx.textBaseline = 'top';
   ctx.fillText(`${cls}${dist}`, sx, sy + size + 2);
 
+  ctx.restore();
+}
+
+// ── PR #39 collision_monitor PolygonStop visualization ─────────────────────
+//
+// The polygon is published in base_footprint frame (fixed shape relative
+// to the robot). Convert each point to map frame using the current robot
+// pose, then to screen via mapToScreen. Colors:
+//   normal:    amber outline, light fill   — "this is the safety zone"
+//   triggered: red outline, stronger fill  — "something's inside it now"
+function _polygonScreenPts() {
+  if (!collisionPolygonPoints || !robotPos) return null;
+  const cosY = Math.cos(robotPos.yaw);
+  const sinY = Math.sin(robotPos.yaw);
+  const out = [];
+  for (const p of collisionPolygonPoints) {
+    // base_footprint -> map: rotate by yaw, translate by robot pos
+    const mx = robotPos.x + p.x * cosY - p.y * sinY;
+    const my = robotPos.y + p.x * sinY + p.y * cosY;
+    const sp = mapToScreen(mx, my);
+    if (sp) out.push(sp);
+  }
+  return out.length >= 3 ? out : null;
+}
+
+function _strokePolygon(ctx, pts) {
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+  ctx.closePath();
+  if (collisionPolygonTriggered) {
+    ctx.strokeStyle = '#ff3333';
+    ctx.fillStyle = 'rgba(255, 51, 51, 0.18)';
+    ctx.lineWidth = 2;
+  } else {
+    ctx.strokeStyle = 'rgba(255, 140, 0, 0.7)';
+    ctx.fillStyle = 'rgba(255, 140, 0, 0.05)';
+    ctx.lineWidth = 1;
+  }
+  ctx.fill();
+  ctx.stroke();
+}
+
+function drawCollisionPolygon(ctx) {
+  const pts = _polygonScreenPts();
+  if (!pts) return;
+  ctx.save();
+  _strokePolygon(ctx, pts);
+  ctx.restore();
+}
+
+function drawCollisionPolygonLocked(ctx, c) {
+  // Same conversion as free mode but then apply locked-mode rotation
+  // around canvas center (matches drawDetectionsLocked / drawLandmarksLocked).
+  const pts = _polygonScreenPts();
+  if (!pts) return;
+  const ccx = c.width / 2, ccy = c.height / 2;
+  const cosA = Math.cos(robotPos.yaw);
+  const sinA = Math.sin(robotPos.yaw);
+  const rot = pts.map(p => {
+    const dx = p.x - ccx, dy = p.y - ccy;
+    return { x: dx * cosA - dy * sinA + ccx, y: dx * sinA + dy * cosA + ccy };
+  });
+  ctx.save();
+  _strokePolygon(ctx, rot);
   ctx.restore();
 }
 
