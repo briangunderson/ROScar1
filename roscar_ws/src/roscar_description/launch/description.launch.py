@@ -21,10 +21,12 @@ def generate_launch_description():
             output='screen',
         ),
 
-        Node(
-            package='joint_state_publisher',
-            executable='joint_state_publisher',
-            name='joint_state_publisher',
-            output='screen',
-        ),
+        # 2026-05-01: joint_state_publisher REMOVED. It was burning ~10 %
+        # Pi5 CPU publishing wheel-rotation joint angles that no current
+        # consumer uses (Nav2 has hardcoded footprint; lidar/camera TFs
+        # are static URDF transforms not joint-driven; the dashboard map
+        # tile draws no wheel rotation). The wheels' visual orientation
+        # in RViz is now static — pure cosmetic loss. Revisit if we ever
+        # add visualization that genuinely needs animated wheels.
+        # See docs/superpowers/specs/2026-05-01-cpu-optimization-proposal.md.
     ])
