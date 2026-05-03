@@ -362,6 +362,28 @@ input[type=range]::-moz-range-thumb {
 }
 .save-map-row .text-input-sm { flex: 1; }
 
+/* T2a: Remote SLAM toggle (only meaningful for SLAM mode) */
+.remote-slam-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted, #888);
+  cursor: pointer;
+  user-select: none;
+}
+.remote-slam-row input[type="checkbox"] {
+  cursor: pointer;
+  margin: 0;
+}
+.remote-slam-row.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.remote-slam-row.disabled input { cursor: not-allowed; }
+.remote-slam-label { letter-spacing: 0.5px; }
+
 /* Nav tuning sliders — compact stat-group rows */
 .tune-row {
   display: grid;

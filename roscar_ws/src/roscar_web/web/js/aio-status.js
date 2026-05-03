@@ -206,6 +206,7 @@ function setupServices() {
         document.querySelectorAll('#panel-status .mode-btn-sm[data-mode]').forEach(b => {
           b.classList.toggle('active', b.dataset.mode === currentMode);
         });
+        updateRemoteSlamRowState(currentMode);
       }
       // Always re-assert navGoalCallback's bool — cheap, idempotent, and
       // catches the case where the dashboard's navGoalMode got out of
@@ -221,8 +222,43 @@ function setupServices() {
   setInterval(syncModeFromServer, 3000);
 }
 
+// T2a: Remote-SLAM toggle. Persists in localStorage so the user's
+// preference survives reloads. Only meaningful for SLAM mode — disabled
+// when other modes are active to make that obvious.
+const REMOTE_SLAM_KEY = 'roscar_use_remote_slam_v1';
+function readRemoteSlamPref() {
+  try { return localStorage.getItem(REMOTE_SLAM_KEY) === 'true'; }
+  catch (_) { return false; }
+}
+function writeRemoteSlamPref(v) {
+  try { localStorage.setItem(REMOTE_SLAM_KEY, v ? 'true' : 'false'); }
+  catch (_) { /* localStorage may be unavailable in some contexts */ }
+}
+
+function setupRemoteSlamToggle() {
+  const cb = document.getElementById('remote-slam-toggle');
+  if (!cb) return;
+  cb.checked = readRemoteSlamPref();
+  cb.addEventListener('change', () => {
+    writeRemoteSlamPref(cb.checked);
+    toast(`Remote SLAM ${cb.checked ? 'ON' : 'OFF'} — applies on next SLAM start`,
+          cb.checked ? 'ok' : '');
+  });
+}
+
+// Reflect "this toggle is only meaningful in SLAM mode" via a disabled-look
+// styling, but still allow toggling so the user can pre-set before clicking SLAM.
+function updateRemoteSlamRowState(activeMode) {
+  const row = document.querySelector('.remote-slam-row');
+  if (!row) return;
+  const relevant = activeMode === 'slam';
+  row.classList.toggle('disabled', !relevant && activeMode !== 'idle');
+}
+
 // ── Mode Buttons ────────────────────────────────────────────────────────────
 function setupModeButtons() {
+  setupRemoteSlamToggle();
+
   const navMapSelect = document.getElementById('nav-map-select');
   const applyBtn     = document.getElementById('apply-mode-btn');
   const refreshBtn   = document.getElementById('refresh-maps-btn');
@@ -245,6 +281,7 @@ function setupModeButtons() {
       document.querySelectorAll('#panel-status .mode-btn-sm[data-mode]').forEach(b =>
         b.classList.remove('active'));
       btn.classList.add('active');
+      updateRemoteSlamRowState(mode);
     });
   });
 
@@ -325,7 +362,14 @@ function requestSetMode(mode, mapPath, statusEl) {
   // use_depth defaults to true — D435i is the sole camera now and is expected
   // in every mode. Without an explicit value, the SetMode bool field defaults
   // to false and depth_camera.launch.py is skipped, leaving /image_raw silent.
-  const req = new ROSLIB.ServiceRequest({ mode, map_path: mapPath, use_depth: true });
+  // use_remote_slam (T2a) is read from the persistent toggle; launch_manager
+  // ignores it for non-slam modes so it's safe to always pass.
+  const req = new ROSLIB.ServiceRequest({
+    mode,
+    map_path: mapPath,
+    use_depth: true,
+    use_remote_slam: readRemoteSlamPref(),
+  });
   setModeSvc.callService(req, (resp) => {
     if (resp.success) {
       currentMode = mode;
@@ -422,7 +466,12 @@ function setupMapReset() {
       // Step 2: wait for old nodes to fully shut down, then restart SLAM
       showMsg(msgEl, 'Waiting for shutdown...');
       setTimeout(() => {
-      const restoreReq = new ROSLIB.ServiceRequest({ mode: restoreMode, map_path: '', use_depth: true });
+      const restoreReq = new ROSLIB.ServiceRequest({
+        mode: restoreMode,
+        map_path: '',
+        use_depth: true,
+        use_remote_slam: readRemoteSlamPref(),
+      });
       setModeSvc.callService(restoreReq, (resp2) => {
         if (resp2.success) {
           currentMode = restoreMode;
