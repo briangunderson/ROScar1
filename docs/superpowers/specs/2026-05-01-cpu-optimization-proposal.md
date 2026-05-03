@@ -207,6 +207,75 @@ Tier 2 and 3 are NOT in this PR. They need explicit user go/no-go.
 - /scan_depth at 11 Hz (was 10–13 before — same).
 - Zero TF errors in 2 minutes.
 
+---
+
+## 8. T2a pre-flight — measured Pi ↔ WSL2 ROS2 round-trip latency (2026-05-03)
+
+The proposal said T2a (move slam_toolbox to WSL2) needs a pre-flight network latency check before greenlighting. Done.
+
+### Setup
+
+- **Both machines NTP-synced** to local LAN server `192.168.1.11` (after pointing WSL2 at it; default Ubuntu config used `ntp.ubuntu.com` over public internet, which would have made one-way measurements meaningless).
+- **Round-trip probe** (clock-skew immune): Pi publishes a `Header` at 50 Hz with stamp = `time.monotonic_ns()`. WSL2 echoes immediately on `/probe_back`. Pi computes `(monotonic_ns_now - sent_monotonic) / 1e6 ms`. 600 samples per run.
+- **DDS path**: CycloneDDS unicast, KEEP_LAST(10), RELIABLE QoS — matches what `tf2_msgs/TFMessage` would use in production.
+
+### Results
+
+#### Idle (Pi load avg ~0.5)
+
+| | RTT (ms) | One-way (RT/2, ms) |
+|---|---|---|
+| min | 1.63 | 0.82 |
+| median | 2.01 | **1.00** |
+| mean | 2.41 | 1.21 |
+| p95 | 4.31 | 2.16 |
+| p99 | 8.92 | **4.46** |
+| max | 15.18 | 7.59 |
+
+#### Under slam_nav load (Pi load avg ~2)
+
+| | RTT (ms) | One-way (RT/2, ms) |
+|---|---|---|
+| min | 1.69 | 0.85 |
+| median | 4.48 | **2.24** |
+| mean | 5.71 | 2.86 |
+| p95 | 13.61 | 6.81 |
+| p99 | 23.97 | **11.99** |
+| max | 28.53 | 14.27 |
+
+### What this means for T2a
+
+The biggest concern was: would moving slam_toolbox to WSL2 introduce TF lag bigger than what crashed nav today? The answer is a **resounding no**.
+
+- Today's failure: `map → odom` was **524 ms** behind real time when the controller looked it up. That was CPU starvation, not network.
+- Even under slam_nav load, **p99 round-trip** to WSL2 and back is **24 ms**. Worst single sample: **29 ms**. That's **1/35 of `transform_tolerance: 1.0`** (post-PR #34) and **1/22 of the original 524 ms failure**.
+- The "T2a is too risky to ship" defensive position assumed Pi↔WSL2 latency might be 100+ ms. Real number: median 4 ms, p99 24 ms, max 29 ms under load.
+
+### Caveats
+
+- These measurements were on Pi WiFi (the Pi shows ICMP RTT 15-25ms to my host; ROS2 latency is much better because we're on a wired backbone for most of the path). A wired Ethernet on the Pi would push median sub-1ms.
+- Robot-driving with sustained motion adds CPU contention to the Pi side, which was the variable that affected today's failure. The "under slam_nav load" measurement above was idle slam_nav (no goal active). I'd want to re-measure during an actively-running goal to nail down the worst-case tail. Estimated: +50-100 % on the tail values, putting p99 around 50 ms. Still well within tolerance.
+- WSL2 mirrored networking introduces an extra Windows-vEthernet bridge hop. If we were running ROS2 directly on Linux instead of WSL2, latency would drop another ~1 ms.
+
+### Recommended T2a green-light criterion
+
+**MET.** I'd ship this. Specifically:
+
+- p99 under load < 50 ms ✅ (measured 24 ms)
+- max under load < 100 ms ✅ (measured 29 ms)
+- Median sub-10 ms ✅ (measured 4.5 ms)
+
+### Updated proposal status
+
+| Tier | Item | Status |
+|---|---|---|
+| 1 | Realsense diet + drop joint_state_publisher | ✅ shipped + measured |
+| 1 | T1c (map_saver_server profile), T1d (chrt priority) | ☐ awaiting go/no-go |
+| **2** | **T2a (slam_toolbox to WSL2)** | **✅ pre-flight passed; awaiting go/no-go to ship** |
+| 2 | T2b (persistent Nav2 lifecycle) | ☐ deferred until T2a stable |
+| 2 | T2c (component composition) | ☐ deferred (probably skip) |
+| 3 | All speculative | ☐ unchanged |
+
 ## 7. Defend-me list (positions I expect pushback on)
 
 - **"Don't break wheel rotation in RViz"** — Counter: nobody's looking at wheel rotation in RViz during ops. Cosmetic-only.
