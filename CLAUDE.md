@@ -735,6 +735,46 @@ will save time if the rest of the doc can assume current truth.
 
 udev rules live in `scripts/setup_rpi.sh`. Re-run it (or the relevant `udevadm` reload) after a system reset.
 
+### ⚠ Pi runtime workspace topology — non-obvious gotcha
+
+The Pi has TWO copies of the workspace:
+
+- **`~/ROScar1`** — the git checkout (this is where you `git pull`/`git checkout`)
+- **`~/roscar_ws/src/`** — the colcon build source (this is what `colcon build` actually reads)
+
+`~/roscar_ws/src/*` is **mostly** symlinked into `~/ROScar1/roscar_ws/src/*` — but **two packages are physical copies** that are NOT symlinked:
+
+```
+~/roscar_ws/src/
+├── roscar_bringup     → symlink to ~/ROScar1/...
+├── roscar_description → symlink
+├── roscar_driver      → symlink
+├── roscar_cv          → symlink
+├── roscar_web         → symlink
+├── roscar_interfaces  ← PHYSICAL COPY (not a symlink!)
+└── sllidar_ros2       ← PHYSICAL COPY (not a symlink!)
+```
+
+**Why this matters.** When you `git checkout some-branch` in `~/ROScar1`, the symlinked packages auto-update on the build side. The two physical copies do not. If the branch changes a `.srv`/`.msg`/`.action` file in `roscar_interfaces`, you'll build stale interface stubs and the new field will be invisible at runtime.
+
+**Symptom.** `ros2 service call ... '{... new_field: ...}'` returns:
+```
+Failed to populate field: 'XXX_Request' object has no attribute 'new_field'
+```
+even though the source on the branch has it.
+
+**Fix.** Sync the physical copy by hand after a branch change that touches `roscar_interfaces`:
+
+```bash
+cp ~/ROScar1/roscar_ws/src/roscar_interfaces/srv/<file>.srv \
+   ~/roscar_ws/src/roscar_interfaces/srv/<file>.srv
+cd ~/roscar_ws && rm -rf build/roscar_interfaces install/roscar_interfaces
+colcon build --symlink-install --packages-select roscar_interfaces <consumers>
+sudo systemctl restart roscar-web
+```
+
+Bit us twice (PRs #26, #37). Worth either symlinking or scripting the sync — neither is done yet.
+
 ## Hardware Orientation
 The board is mounted 180-deg rotated on the chassis. Motor wiring has been physically
 corrected so all 4 motor ports match their board labels (M1=FL, M2=RL, M3=FR, M4=RR)
