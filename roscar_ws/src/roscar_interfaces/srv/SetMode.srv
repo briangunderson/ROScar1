@@ -5,6 +5,13 @@ string map_path
 # the D435i depth camera is launched alongside the robot stack.
 # Default is false (new field — clients that omit it get use_depth=false).
 bool use_depth
+# T2a: when true (and mode == "slam"), the Pi-local slam_toolbox is NOT
+# spawned. The Pi's lifecycle_manager_slam discovers and manages a
+# remote slam_toolbox running on the WSL2 GPU PC via DDS. Saves ~10-15 %
+# Pi CPU. Requires WSL2 running roscar_cv/launch/slam_remote.launch.py.
+# Ignored for non-slam modes. Default false (clients that omit it get
+# the existing Pi-local behavior).
+bool use_remote_slam
 ---
 bool success
 string message

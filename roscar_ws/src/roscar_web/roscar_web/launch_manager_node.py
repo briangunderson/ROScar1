@@ -98,9 +98,14 @@ class LaunchManagerNode(Node):
 
     def _set_mode_callback(self, request, response):
         mode = request.mode.strip()
+        # use_remote_slam is only meaningful in slam mode (T2a). slam_nav
+        # uses nav2_bringup's slam_launch.py internally and doesn't expose
+        # an opt-in path. Other modes silently ignore it.
+        use_remote_slam = bool(getattr(request, 'use_remote_slam', False))
         self.get_logger().info(
             f'set_mode request received: mode={mode!r} '
-            f'map_path={request.map_path!r} use_depth={request.use_depth}'
+            f'map_path={request.map_path!r} use_depth={request.use_depth} '
+            f'use_remote_slam={use_remote_slam}'
         )
 
         # Any mode change cancels an in-flight carryover publisher. The bg
@@ -135,6 +140,14 @@ class LaunchManagerNode(Node):
             # Forward use_depth to any mode — all four parent launch files
             # (teleop=robot, slam, navigation, slam_nav) declare the arg.
             cmd.append(f'use_depth:={"true" if request.use_depth else "false"}')
+
+            # T2a: forward use_remote_slam only to slam mode. The other
+            # launch files don't declare the arg — passing it would cause
+            # a "unknown launch argument" warning. slam_nav can't use the
+            # opt-in path because nav2_bringup's slam_launch.py spawns
+            # slam_toolbox internally (out of our reach without forking).
+            if mode == 'slam' and use_remote_slam:
+                cmd.append('use_remote_slam:=true')
 
         # Capture current robot pose if we're transitioning slam* → navigation
         # so AMCL can start localized where slam_toolbox left the robot,

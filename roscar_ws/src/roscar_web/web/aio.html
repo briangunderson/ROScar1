@@ -160,6 +160,14 @@
             <button id="refresh-maps-btn" class="sm-btn" title="Refresh map list">&#x21BB;</button>
             <button id="apply-mode-btn" class="sm-btn primary">GO</button>
           </div>
+          <!-- T2a: opt-in toggle to run slam_toolbox on the WSL2 GPU PC instead -->
+          <!-- of the Pi. Only meaningful for SLAM mode. State persists in -->
+          <!-- localStorage. Requires roscar_cv/launch/slam_remote.launch.py running -->
+          <!-- on WSL2 — see tasks/t2a-poc-2026-05-03.md. -->
+          <label class="remote-slam-row" title="Run slam_toolbox on WSL2 GPU PC instead of Pi (saves Pi CPU; requires WSL2 running slam_remote.launch.py). Only applies to SLAM mode.">
+            <input type="checkbox" id="remote-slam-toggle">
+            <span class="remote-slam-label">Remote SLAM (WSL2)</span>
+          </label>
           <div id="mode-status-msg" class="status-msg"></div>
         </div>
 
