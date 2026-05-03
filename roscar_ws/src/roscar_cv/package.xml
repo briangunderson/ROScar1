@@ -18,6 +18,13 @@
   <depend>tf2_ros</depend>
   <depend>image_transport</depend>
 
+  <!-- T2a (2026-05-03): roscar_cv also hosts the optional remote slam_toolbox
+       launch (slam_remote.launch.py). Pi opts in via use_remote_slam:=true on
+       slam.launch.py. The slam_toolbox runtime + config are needed only on
+       the WSL2 side; the dependency is harmless when this package is built
+       on a system without it. -->
+  <exec_depend>slam_toolbox</exec_depend>
+
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>
